@@ -1,0 +1,25 @@
+//  bn128 *host_comd = new bn128[32];
+    
+//     cudaMemcpy(host_comd, com_d, sizeof(bn128) * 32, cudaMemcpyDeviceToHost);
+
+//     jacob_t *host_p;
+//     cudaMalloc(&host_p, sizeof(jacob_t) * size);
+
+//     affine_to_jacob<<<(size + 512 - 1) / 512, 512>>>(host_p, g_affine, size);
+//     CUDA_DEBUG;
+
+//     bn128 *host_bn128 = new bn128[size];
+//     cudaMemcpy(host_bn128, host_p, sizeof(jacob_t) * size, cudaMemcpyDeviceToHost);
+
+//     #pragma omp parallel for
+//     for(int i = 0; i < 32; i++){
+//         bn128 now = bn128::zero();
+//         for(int j = 0; j < size; j++){
+//             now = now + host_d[i * size + j] * host_bn128[j];
+
+//         }
+//         if(now == host_comd[i]) printf("passed\n");
+//         //else printf("failed\n");
+//     }
+
+//----------------------------------------------------------------------------------------------------------------------
