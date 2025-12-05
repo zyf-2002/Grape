@@ -323,7 +323,6 @@ CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o
  /home/zyf/zkp/zkLLM/include/curve/jacobian_t.cuh
  /home/zyf/zkp/zkLLM/include/curve/curve_common.cuh
  /home/zyf/zkp/zkLLM/include/ioutils.cuh
- /home/zyf/zkp/zkLLM/include/Hyrax.cuh
  /home/zyf/zkp/zkLLM/include/msm.cuh
  /home/zyf/zkp/zkLLM/depends/libsnark/depends/libff/libff/common/profiling.hpp
  /usr/include/c++/11/map
@@ -385,6 +384,7 @@ CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o
  /home/zyf/zkp/zkLLM/depends/libsnark/depends/libff/libff/algebra/scalar_multiplication/wnaf.tcc
  /home/zyf/zkp/zkLLM/include/host_affine.cuh
  /usr/lib/gcc/x86_64-linux-gnu/11/include/omp.h
+ /home/zyf/zkp/zkLLM/include/Hyrax.cuh
  /home/zyf/zkp/zkLLM/include/g1-tensor.cuh
  /usr/include/c++/11/iomanip
  /usr/include/c++/11/locale

@@ -160,6 +160,9 @@ public:
 };
 
 Hyrax_proof Hyrax::open(fr_t *c){
+    FrTensor tmp_value(N);
+    tmp_value = value;
+
     Fr *host_d = new Fr[size];
     #pragma omp parallel for
     for(int i = 0; i < size; i++) host_d[i] = Fr::random_element();
@@ -176,23 +179,15 @@ Hyrax_proof Hyrax::open(fr_t *c){
     FrTensor a(size);
 
     CUDA_TIMER_START(calculate_a);
-    value.partial_me(X, (N / layer) / size, Log2(size), size);
+    value.partial_me(N, X, (N / layer) / size, Log2(size), size);
 
-    CUDA_DEBUG;
-    for(int i = 0; i < layer; i++){
-        if(N / layer == size) break;
-        cudaMemcpy(value.gpu_data + i * size, value.gpu_data + i * (N / layer) , sizeof(fr_t) * size, cudaMemcpyDeviceToDevice);
-    }
-
-    CUDA_DEBUG;
-    value.partial_me(X, layer, Log2(N / layer), size);
+    value.partial_me(size * layer, X, layer, Log2(N / layer), size);
     a = value;
-    CUDA_DEBUG;
     CUDA_TIMER_STOP(calculate_a);
     
     Fr result;
     CUDA_TIMER_START(calculate_result);
-    value.partial_me(X, size, 0, 1);
+    value.partial_me(size, X, size, 0, 1);
     CUDA_TIMER_STOP(calculate_result);
     cudaMemcpy(&result, value.gpu_data, sizeof(fr_t), cudaMemcpyDeviceToHost);
 
@@ -202,7 +197,8 @@ Hyrax_proof Hyrax::open(fr_t *c){
     z += d;
 
     CUDA_TIMER_START(calculate_ad);
-    d.partial_me(X, size, 0, 1);
+    d.partial_me(d.size, X, size, 0, 1);
+   
     CUDA_TIMER_STOP(calculate_ad);
     
     Fr sum_ad;
@@ -217,6 +213,16 @@ Hyrax_proof Hyrax::open(fr_t *c){
     cudaMemcpy(&host_com_d, com_d, sizeof(bn128), cudaMemcpyDeviceToHost);
 
     Hyrax_proof proof(result, host_z, host_com_d, com_ad);
+
+    value = tmp_value;
+    printf("%u\n",size);
+    value.partial_me(N, X, size, 0, 1);
+    value.partial_me(N / size, X, 4, Log2(N / 4), 1024);
+    value.partial_me(1024, X, 1024, Log2(size), 1);
+    Fr kk;
+    cudaMemcpy(&kk, value.gpu_data, sizeof(fr_t), cudaMemcpyDeviceToHost);
+    assert(kk == result);
+
     return proof;
 }
 

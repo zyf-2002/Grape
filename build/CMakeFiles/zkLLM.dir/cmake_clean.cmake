@@ -3,8 +3,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/zkLLM.dir/src/g1-tensor.cu.o.d"
   "CMakeFiles/zkLLM.dir/src/ioutils.cu.o"
   "CMakeFiles/zkLLM.dir/src/ioutils.cu.o.d"
-  "libzkLLMd.a"
-  "libzkLLMd.pdb"
+  "libzkLLM.a"
+  "libzkLLM.pdb"
 )
 
 # Per-language clean rules from dependency scanning.

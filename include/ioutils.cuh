@@ -48,3 +48,5 @@ ulong findsize(const string& filename);
 void loadbin(const string& filename, void* gpudata, ulong size);
 
 uint Log2(uint num);
+
+uint load_data(const string& filename, int **out_ptr);

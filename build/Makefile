@@ -189,6 +189,19 @@ HyraxTest/fast:
 .PHONY : HyraxTest/fast
 
 #=============================================================================
+# Target rules for targets named sumcheckTest
+
+# Build rule for target.
+sumcheckTest: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sumcheckTest
+.PHONY : sumcheckTest
+
+# fast build rule for target.
+sumcheckTest/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sumcheckTest.dir/build.make CMakeFiles/sumcheckTest.dir/build
+.PHONY : sumcheckTest/fast
+
+#=============================================================================
 # Target rules for targets named doc
 
 # Build rule for target.
@@ -1339,6 +1352,30 @@ test/HyraxTest.cu.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/HyraxTest.dir/build.make CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.s
 .PHONY : test/HyraxTest.cu.s
 
+test/sumcheckTest.o: test/sumcheckTest.cu.o
+.PHONY : test/sumcheckTest.o
+
+# target to build an object file
+test/sumcheckTest.cu.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sumcheckTest.dir/build.make CMakeFiles/sumcheckTest.dir/test/sumcheckTest.cu.o
+.PHONY : test/sumcheckTest.cu.o
+
+test/sumcheckTest.i: test/sumcheckTest.cu.i
+.PHONY : test/sumcheckTest.i
+
+# target to preprocess a source file
+test/sumcheckTest.cu.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sumcheckTest.dir/build.make CMakeFiles/sumcheckTest.dir/test/sumcheckTest.cu.i
+.PHONY : test/sumcheckTest.cu.i
+
+test/sumcheckTest.s: test/sumcheckTest.cu.s
+.PHONY : test/sumcheckTest.s
+
+# target to generate assembly for a file
+test/sumcheckTest.cu.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sumcheckTest.dir/build.make CMakeFiles/sumcheckTest.dir/test/sumcheckTest.cu.s
+.PHONY : test/sumcheckTest.cu.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -1421,6 +1458,7 @@ help:
 	@echo "... relations_sap_test"
 	@echo "... relations_ssp_test"
 	@echo "... snark"
+	@echo "... sumcheckTest"
 	@echo "... test_knapsack_gadget"
 	@echo "... test_merkle_tree_gadgets"
 	@echo "... test_set_commitment_gadget"
@@ -1445,6 +1483,9 @@ help:
 	@echo "... test/HyraxTest.o"
 	@echo "... test/HyraxTest.i"
 	@echo "... test/HyraxTest.s"
+	@echo "... test/sumcheckTest.o"
+	@echo "... test/sumcheckTest.i"
+	@echo "... test/sumcheckTest.s"
 .PHONY : help
 
 

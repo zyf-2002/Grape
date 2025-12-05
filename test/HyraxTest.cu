@@ -8,8 +8,6 @@
 #include <omp.h>
 
 using namespace std;
-
-
 using namespace libsnark;
 
 const size_t N = 11008;
@@ -26,7 +24,7 @@ int main(int argc, char *argv[])
     auto cpu_pre = precompute_generators(N, W, out);
 
     int *int_data;
-    string filename = "../data/test3.bin";
+    string filename = "../data/X_up_rem.bin";
 
     CPU_TIMER_START(load_data);
     auto size = findsize(filename) / sizeof(int);

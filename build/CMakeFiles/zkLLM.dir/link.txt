@@ -1,2 +1,2 @@
-/usr/bin/ar qc libzkLLMd.a CMakeFiles/zkLLM.dir/src/g1-tensor.cu.o CMakeFiles/zkLLM.dir/src/ioutils.cu.o
-/usr/bin/ranlib libzkLLMd.a
+/usr/bin/ar qc libzkLLM.a CMakeFiles/zkLLM.dir/src/g1-tensor.cu.o CMakeFiles/zkLLM.dir/src/ioutils.cu.o
+/usr/bin/ranlib libzkLLM.a

@@ -1,5 +1,6 @@
 /home/zyf/zkp/zkLLM/build/CMakeFiles/zkLLM.dir
 /home/zyf/zkp/zkLLM/build/CMakeFiles/HyraxTest.dir
+/home/zyf/zkp/zkLLM/build/CMakeFiles/sumcheckTest.dir
 /home/zyf/zkp/zkLLM/build/CMakeFiles/edit_cache.dir
 /home/zyf/zkp/zkLLM/build/CMakeFiles/rebuild_cache.dir
 /home/zyf/zkp/zkLLM/build/CMakeFiles/list_install_components.dir

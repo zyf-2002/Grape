@@ -6,6 +6,7 @@ cmake_policy(SET CMP0009 NEW)
 file(GLOB NEW_GLOB LIST_DIRECTORIES true "/home/zyf/zkp/zkLLM/test/*.cu")
 set(OLD_GLOB
   "/home/zyf/zkp/zkLLM/test/HyraxTest.cu"
+  "/home/zyf/zkp/zkLLM/test/sumcheckTest.cu"
   )
 if(NOT "${NEW_GLOB}" STREQUAL "${OLD_GLOB}")
   message("-- GLOB mismatch!")

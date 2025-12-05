@@ -322,7 +322,6 @@ CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o: ../test/HyraxTest.cu \
   ../include/curve/jacobian_t.cuh \
   ../include/curve/curve_common.cuh \
   ../include/ioutils.cuh \
-  ../include/Hyrax.cuh \
   ../include/msm.cuh \
   ../depends/libsnark/depends/libff/libff/common/profiling.hpp \
   /usr/include/c++/11/map \
@@ -384,6 +383,7 @@ CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o: ../test/HyraxTest.cu \
   ../depends/libsnark/depends/libff/libff/algebra/scalar_multiplication/wnaf.tcc \
   ../include/host_affine.cuh \
   /usr/lib/gcc/x86_64-linux-gnu/11/include/omp.h \
+  ../include/Hyrax.cuh \
   ../include/g1-tensor.cuh \
   /usr/include/c++/11/iomanip \
   /usr/include/c++/11/locale \
@@ -417,6 +417,10 @@ CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o: ../test/HyraxTest.cu \
 /usr/include/c++/11/algorithm:
 
 ../depends/libsnark/depends/libff/libff/algebra/scalar_multiplication/multiexp.tcc:
+
+../include/Hyrax.cuh:
+
+../depends/libsnark/depends/libff/libff/algebra/curves/alt_bn128/alt_bn128_g2.hpp:
 
 ../depends/libsnark/depends/libff/libff/algebra/curves/curve_utils.tcc:
 
@@ -469,10 +473,6 @@ CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o: ../test/HyraxTest.cu \
 ../depends/libsnark/depends/libff/libff/common/profiling.hpp:
 
 ../include/msm.cuh:
-
-../depends/libsnark/depends/libff/libff/algebra/curves/alt_bn128/alt_bn128_g2.hpp:
-
-../include/Hyrax.cuh:
 
 ../include/curve/jacobian_t.cuh:
 

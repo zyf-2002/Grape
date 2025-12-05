@@ -68,6 +68,14 @@ void loadbin(const string& filename, void* gpudata, ulong size)
 
 }
 
+uint load_data(const string& filename, int **out_ptr){
+    auto size = findsize(filename) / sizeof(int);
+    cout << filename << "size: " << size << endl;   
+    cudaMalloc((void **)out_ptr, sizeof(int) * size);
+    loadbin(filename, *out_ptr, sizeof(int) * size);
+    return size;
+}
+
 
 uint Log2(uint num) {
     if (num == 0) return 0;

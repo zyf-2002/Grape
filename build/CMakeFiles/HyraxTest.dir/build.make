@@ -92,7 +92,7 @@ HyraxTest_EXTERNAL_OBJECTS =
 
 CMakeFiles/HyraxTest.dir/cmake_device_link.o: CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o
 CMakeFiles/HyraxTest.dir/cmake_device_link.o: CMakeFiles/HyraxTest.dir/build.make
-CMakeFiles/HyraxTest.dir/cmake_device_link.o: libzkLLMd.a
+CMakeFiles/HyraxTest.dir/cmake_device_link.o: libzkLLM.a
 CMakeFiles/HyraxTest.dir/cmake_device_link.o: depends/libsnark/libsnark/libsnarkd.a
 CMakeFiles/HyraxTest.dir/cmake_device_link.o: depends/libsnark/depends/libff/libff/libffd.a
 CMakeFiles/HyraxTest.dir/cmake_device_link.o: /usr/lib/x86_64-linux-gnu/libgmp.so
@@ -115,7 +115,7 @@ HyraxTest_EXTERNAL_OBJECTS =
 
 HyraxTest: CMakeFiles/HyraxTest.dir/test/HyraxTest.cu.o
 HyraxTest: CMakeFiles/HyraxTest.dir/build.make
-HyraxTest: libzkLLMd.a
+HyraxTest: libzkLLM.a
 HyraxTest: depends/libsnark/libsnark/libsnarkd.a
 HyraxTest: depends/libsnark/depends/libff/libff/libffd.a
 HyraxTest: /usr/lib/x86_64-linux-gnu/libgmp.so
