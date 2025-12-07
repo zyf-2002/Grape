@@ -43,12 +43,9 @@ ulong findsize(const string& filename)
 
 void loadbin(const string& filename, void* gpudata, ulong size)
 {
-
-    
     // Allocate memory
-    void* data = malloc(size);
 
-    // Read data from file
+    void* data = malloc(size);
     FILE* file = fopen(filename.c_str(), "rb");
 
     if (!file) {
@@ -59,7 +56,6 @@ void loadbin(const string& filename, void* gpudata, ulong size)
     fread(data, 1, size, file);
     fclose(file);
     
-
     // Copy data from CPU to GPU
     cudaMemcpy(gpudata, data, size, cudaMemcpyHostToDevice);
 

@@ -41,6 +41,7 @@ def save_int(t: torch.Tensor, path):
     # 以二进制追加方式写入文件
     with open(path, 'ab') as f:
         arr.tofile(f)
+        f.flush()
     
 def load_int(path, device = 0):
     if path[-4:] != '.bin':
@@ -129,12 +130,14 @@ class RMSNorm(torch.nn.Module):
         
         global num_norm
         w = torch.round(self.weight.to(torch.float64) * SCALE).to(torch.int32)
-        print(w.shape)
-        if(num_norm % 2 == 0):
-            save_int(w, f'../data/W/NormFirst_layer.bin')
-            all_w_list.append(w)
-        else:
-            save_int(w, f'../data/W/NormSecond_layer.bin')
+        #print(w.shape)
+        
+        if layer_num > 28:
+            if num_norm % 2 == 0:
+                save_int(w, f'../data/W/NormFirst_layer.bin')
+                all_w_list.append(w)
+            else:
+                save_int(w, f'../data/W/NormSecond_layer.bin')
         
         
         num_norm += 1
@@ -377,10 +380,11 @@ class Attention(nn.Module):
         WV_int = torch.round(((self.wv.weight).to(torch.float64)) * SCALE).to(torch.int32)
         WO_int = torch.round(((self.wo.weight).to(torch.float64)) * SCALE).to(torch.int32)
         
-        save_int(WK_int, f'../data/W/Attention_K_layer.bin')
-        save_int(WQ_int, f'../data/W/Attention_Q_layer.bin')
-        save_int(WV_int, f'../data/W/Attention_V_layer.bin')  #保存权重到文件
-        save_int(WO_int, f'../data/W/Attention_O_layer.bin')
+        if layer_num > 28:
+            save_int(WK_int, f'../data/W/Attention_K_layer.bin')
+            save_int(WQ_int, f'../data/W/Attention_Q_layer.bin')
+            save_int(WV_int, f'../data/W/Attention_V_layer.bin')  #保存权重到文件
+            save_int(WO_int, f'../data/W/Attention_O_layer.bin')
        
         x_int = x
 
@@ -389,6 +393,7 @@ class Attention(nn.Module):
         XK_int = torch.matmul(x_int.to(torch.float64), WK_int.t().to(torch.float64)).to(torch.int64)
         XV_int = torch.matmul(x_int.to(torch.float64), WV_int.t().to(torch.float64)).to(torch.int64)
         
+            
         # 反量化
         xq = (XQ_int + SCALE//2) // SCALE
         xk = (XK_int + SCALE//2) // SCALE
@@ -563,29 +568,75 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         x_int = x
+        x_int.to(torch.int32)
         w1_int = torch.round(((self.w1.weight).to(torch.float64)) * SCALE).to(torch.int32)
         w2_int = torch.round(((self.w2.weight).to(torch.float64)) * SCALE).to(torch.int32)
         w3_int = torch.round(((self.w3.weight).to(torch.float64)) * SCALE).to(torch.int32)
         
-        save_int(w1_int, f'../data/W/gate_layer.bin')
-        save_int(w2_int, f'../data/W/down_layer.bin')
-        save_int(w3_int, f'../data/W/up_layer.bin')
+        if layer_num > 28:
+            # max_x  = torch.abs(x_int).max().item()
+            # max_w1 = torch.abs(w1_int).max().item()
+            # max_w2 = torch.abs(w2_int).max().item()
+            # max_w3 = torch.abs(w3_int).max().item()
+
+            # print(f"max |X|   = {max_x}")
+            # print(f"max |W1|  = {max_w1}")
+            # print(f"max |W2|  = {max_w2}")
+            # print(f"max |W3|  = {max_w3}")
+
+            save_int(w1_int, f'../data/W/gate_layer.bin')
+            save_int(w2_int, f'../data/W/down_layer.bin')
+            save_int(w3_int.t(), f'../data/W/up_layer.bin')
+            save_int(x_int, f'../data/X.bin')
         
         
         
         
         
         temp_x1 = torch.matmul(x_int.to(torch.float64), w1_int.t().to(torch.float64)).to(torch.int64)
-        # print("rms max abs:", temp_x1.to(torch.float64).abs().max().item())
+        
         temp_x3 = torch.matmul(x_int.to(torch.float64), w3_int.t().to(torch.float64)).to(torch.int64)
         
+
+        
+        q_temp_x3 = ((temp_x3 + SCALE//2) // SCALE).to(torch.int32)
+        rem_temp_x3 = (temp_x3 - q_temp_x3 * SCALE).to(torch.int32)
+        
+        
+        
+        # print(q_temp_x3.shape)
+        if layer_num > 28:
+            save_int(q_temp_x3, f'../data/X_up.bin')
+            save_int(rem_temp_x3, f'../data/X_up_rem.bin')
+            # y_quot = load_int('../data/X_up.bin')
+            # y_quot = y_quot.reshape(1, 1024, 11008) 
+            # print(y_quot.shape)
+            # if torch.equal(y_quot, q_temp_x3):
+            #     print("✔️ 还原成功，完全一致！")
+                
+        # if layer_num > 28:
+        #     y_quot = load_int('../data/X_up.bin')
+        #     y_quot = y_quot.reshape(1024, 11008) 
+        #     y_rem = load_int('../data/X_up_rem.bin')
+        #     y_rem = y_rem.reshape(1024, 11008)
+        #     xx = load_int('../data/X.bin')
+        #     xx = xx.reshape(1024, 4096)
+        #     ww3 = load_int('../data/W/up_layer.bin')
+        #     ww3 = ww3.reshape(4096, 11008)
+        #     temp_test = torch.matmul(xx.to(torch.float64), ww3.t().to(torch.float64)).to(torch.int64)
+        #     reco_temp_x3 = (q_temp_x3.to(torch.int64)) * SCALE + rem_temp_x3
+        
+            # if torch.equal(reco_temp_x3, temp_test):
+            #     print("✔️ 还原成功，完全一致！")
+        
+        
         temp_x1 = (temp_x1 + SCALE//2) // SCALE
-        temp_x3 = (temp_x3 + SCALE//2) // SCALE
+
         temp_x1 = (temp_x1.to(torch.float64) / SCALE).to(torch.float16)
         #print("rms max abs:", temp_x1.to(torch.float16).abs().max().item())
         temp_x1 = F.silu(temp_x1)
         temp_x1 = torch.round((temp_x1.to(torch.float64)) * SCALE).to(torch.int32)
-        temp_x13 = ((temp_x1.to(torch.int64)) * (temp_x3.to(torch.int64)) + SCALE//2) // SCALE
+        temp_x13 = ((temp_x1.to(torch.int64)) * (q_temp_x3.to(torch.int64)) + SCALE//2) // SCALE
         temp_x13 = temp_x13.to(torch.int32)
         #print(temp_x13.shape)
         temp_x123 = torch.matmul(temp_x13.to(torch.float64), w2_int.t().to(torch.float64)).to(torch.int64)
@@ -752,15 +803,11 @@ class Transformer(nn.Module):
         
         h = self.tok_embeddings(tokens)
         print("---------------------------------------------------------------------------")
-        print(h.shape)
+        #print(h.shape)
         h_temp = h
         h_int = torch.round((h.to(torch.float32)) * SCALE).to(torch.int32)
         
-        # save_int(h_int, "data.bin")
-        # H = load_int("data.bin").view_as(h_int)
-        
-        # print(torch.equal(H, h_int)) 
-        
+       
         h = h_int
         
         self.freqs_cis = self.freqs_cis.to(h.device)
@@ -787,10 +834,10 @@ class Transformer(nn.Module):
             print(f"------------------------------------------------------正在执行第 {i} 层-----------------")  # 这里 i 从 0 开始
             h = layer(h, start_pos, freqs_cis, mask)
             
-        all_w = torch.stack(all_w_list, dim=0)
-        print(all_w.shape)
-        data = load_int("../data/W/NormFirst_layer.bin").view_as(all_w)
-        print(torch.equal(all_w, data)) 
+        # all_w = torch.stack(all_w_list, dim=0)
+        # print(all_w.shape)
+        # data = load_int("../data/W/NormFirst_layer.bin").view_as(all_w)
+        # print(torch.equal(all_w, data)) 
             
         h = self.norm(h)
         # h = (h.to(torch.float64) / SCALE).to(torch.float16)
@@ -799,5 +846,5 @@ class Transformer(nn.Module):
         output = torch.matmul(h.to(torch.float64), output_weight.t().to(torch.float64)).to(torch.int64)
         output = (output + SCALE//2) // SCALE
         output = (output.to(torch.float64) / SCALE).to(torch.float16)
-        print(output.shape)
+        #print(output.shape)
         return output

@@ -146,7 +146,7 @@ FrTensor& FrTensor::operator*=(const uint x)
 
 FrTensor::~FrTensor()
 {
-    cudaFree(gpu_data);
+   cudaFree(gpu_data);
     //cudaFreeAsync(gpu_data, 0);
     gpu_data = nullptr;
 }
@@ -243,7 +243,7 @@ void FrTensor::partial_me(uint N, fr_t *x, uint c, uint id, uint gap)  //N是需
         Memory_alignment<<<((N / c) + 512 -1) / 512, thread>>>(gpu_data, c);
     }
     else{
-        for(int i = 0; i < (N / gap / c); i++){
+        for(int i = 1; i < (N / gap / c); i++){
             //printf("%d\n", i);
             cudaMemcpy(gpu_data + i * gap, gpu_data + i * c * gap , sizeof(fr_t) * gap, cudaMemcpyDeviceToDevice);
         }

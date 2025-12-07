@@ -10,8 +10,8 @@
 using namespace std;
 using namespace libsnark;
 
-const size_t N = 11008;
-const size_t W = 1 << 8;
+const size_t N = 11008;   // number of points /row_size / 
+const size_t W = 1 << 8;  //pre_windows
 const size_t layer_num = 4;
 
 
@@ -19,124 +19,110 @@ int main(int argc, char *argv[])
 {
     
     ppT::init_public_params();
-    affine_t *out;
-    cudaMalloc((void **)&out, sizeof(affine_t) * N * W);
-    auto cpu_pre = precompute_generators(N, W, out);
+    affine_t *points;
+    cudaMalloc((void **)&points, sizeof(affine_t) * N * W);
+    auto cpu_points = precompute_generators(N, W, points);
+    CUDA_DEBUG;
 
-    int *int_data;
+    cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
+
+    int *tensor;
     string filename = "../data/X_up_rem.bin";
-
     CPU_TIMER_START(load_data);
     auto size = findsize(filename) / sizeof(int);
     cout << "size: " << size << endl;   
-    cudaMalloc((void **)&int_data, sizeof(int) * size);
-    loadbin(filename, int_data, sizeof(int) * size);
+    cudaMalloc((void **)&tensor, sizeof(int) * size);
+    loadbin(filename, tensor, sizeof(int) * size);
     CUDA_DEBUG;
-
     CPU_TIMER_STOP(load_data);
 
+    cout<<"----------------------------------"<<"load_data done"<< "----------------------------------"<<endl;
 
-    jacob_t *commitment;
-    uint outputsize = size / N;
-    cudaMalloc((void **)&commitment, sizeof(jacob_t) * outputsize);
-
-    Hyrax hyrax(size, N, int_data, out, commitment, cpu_pre[0]);
+    Hyrax hyrax(size, N, points, cpu_points[0]);
 
     CUDA_TIMER_START(Hyrax_commit);
-    hyrax.commit();
+    jacob_t *commitment = hyrax.commit(tensor);
     CUDA_DEBUG;
     CUDA_TIMER_STOP(Hyrax_commit); 
 
-    uint x_num = Log2(size);
-    vector<Fr> cpu_x;
-    cpu_x.resize(x_num);
+    cout<<"----------------------------------"<<"commit done"<< "----------------------------------"<<endl;
+
+    vector<Fr> eval_point;
+    eval_point.resize(Log2(size));
     #pragma omp parallel for
-    for(int i = 0; i < x_num; i++){
-        cpu_x[i] = Fr::random_element();
+    for(int i = 0; i < Log2(size); i++){
+        eval_point[i] = Fr::random_element();
     }
     
-
-    fr_t *x;
-    cudaMalloc((void **)&x, sizeof(fr_t) * x_num);
-
-    cudaMemcpy(x, cpu_x.data(), sizeof(fr_t) * x_num, cudaMemcpyHostToDevice);
-
-    CUDA_DEBUG;
-
-    
-    CUDA_TIMER_START(Hyrax_eval);
-    auto claim = hyrax.eval(x);
-    CUDA_DEBUG;
-    CUDA_TIMER_STOP(Hyrax_eval); 
-
-   
     Fr c = Fr::random_element();
-    fr_t *c_dev; cudaMalloc(&c_dev, sizeof(fr_t)); cudaMemcpy(c_dev, &c, sizeof(fr_t), cudaMemcpyHostToDevice);
-
-
     CUDA_TIMER_START(Hyrax_open)
-    auto proof = hyrax.open(c_dev);
+    auto proof = hyrax.open(tensor, eval_point, c);
     CUDA_DEBUG;
     CUDA_TIMER_STOP(Hyrax_open)
 
 
-
+    cout<<"----------------------------------"<<"open_proof done"<< "----------------------------------"<<endl;
 
 
     CPU_TIMER_START(verify);
-
-    bn128 *host_commitment = new bn128[outputsize];
-    cudaMemcpy(host_commitment, commitment, sizeof(jacob_t) * outputsize, cudaMemcpyDeviceToHost);
+    bn128 *host_commitment = new bn128[size / N];
+    cudaMemcpy(host_commitment, commitment, sizeof(jacob_t) * (size / N), cudaMemcpyDeviceToHost);
     uint start_x = Log2(N);
-    bn128 *CC = new bn128[layer_num];
+    bn128 *layer_C_ = new bn128[layer_num];
     bn128 C_;
 
-    CPU_TIMER_START(partial);
+    
     for(int i = 0; i < layer_num; i++){
-        CC[i] = host_partial_me<bn128>(host_commitment + i * (size / layer_num / N), size / N / layer_num, cpu_x.begin() + start_x, cpu_x.end() - Log2(layer_num));
+        layer_C_[i] = host_partial_me<bn128>(host_commitment + i * (size / layer_num / N), size / N / layer_num, eval_point.begin() + start_x, eval_point.end() - Log2(layer_num));
     }
-    C_ = host_partial_me<bn128>(CC, layer_num, cpu_x.begin() + Log2(size / layer_num), cpu_x.end());
-    CPU_TIMER_STOP(partial);
+    C_ = host_partial_me<bn128>(layer_C_, layer_num, eval_point.begin() + Log2(size / layer_num), eval_point.end());
     
     
-    bn128 now = bn128::zero();
-
-    CPU_TIMER_START(partiall);
+    
+    bn128 commit_z = bn128::zero();
     #pragma omp parallel
     {
         bn128 local = bn128::zero();
         #pragma omp for
         for (int j = 0; j < N; j++) {
-            local = local + proof.z[j] * cpu_pre[j];
+            local = local + proof.z[j] * cpu_points[j];
         }
         #pragma omp critical
-        now = now + local;
+        commit_z = commit_z + local;
     }
-    CPU_TIMER_STOP(partiall);
 
     C_ = c * C_;
-    C_ = C_ + proof.com_d;
-    assert(C_ == now);
+    C_ = C_ + proof.commit_d;
+    assert(C_ == commit_z);
     
 
     Fr az;
+
+    az = host_partial_me<Fr>(proof.z, N, eval_point.begin(), eval_point.begin() + start_x);
     
-    az = host_partial_me<Fr>(proof.z, N, cpu_x.begin(), cpu_x.begin() + start_x);
-    
-    bn128 left = (c * proof.result) * cpu_pre[0] + proof.com_s;
-    bn128 right = az * cpu_pre[0];
+    bn128 left = (c * proof.result) * cpu_points[0] + proof.commit_ad;
+    bn128 right = az * cpu_points[0];
     assert(left == right);
     
-    
-    cudaFree(c_dev);
-
     CPU_TIMER_STOP(verify);
 
+    CUDA_DEBUG;
+    cout<<"----------------------------------"<<"verify done"<< "----------------------------------"<<endl;
 
+
+    cudaFree(tensor);
+    cudaFree(points);
+    cudaFree(commitment);
+    delete[] host_commitment;
+    delete[] layer_C_;
+
+    CUDA_DEBUG;
+
+    cout<<"----------------------------------"<<"free_data done"<< "----------------------------------"<<endl;
 
 
     // int* cpu_data = new int[size];
-    // cudaMemcpy(cpu_data, int_data, sizeof(int) * size, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(cpu_data, tensor, sizeof(int) * size, cudaMemcpyDeviceToHost);
     
 
     //Fr *cpu_scalars = new libff::alt_bn128_Fr[size];
@@ -156,14 +142,14 @@ int main(int argc, char *argv[])
 
     // std::cout << "执行时间: " << ms << " ms" << std::endl;
 
-    // bn128* gpu_commit = new bn128[outputsize];
-    // cudaMemcpy(gpu_commit, commitment, sizeof(jacob_t) * outputsize, cudaMemcpyDeviceToHost);
+    // bn128* gpu_commit = new bn128[size / N];
+    // cudaMemcpy(gpu_commit, commitment, sizeof(jacob_t) * (size /N), cudaMemcpyDeviceToHost);
 
     // #pragma omp parallel for
     // for(int i=0; i < size; i+= N){
     //     bn128 now = bn128::zero();
     //     for(int j=0; j < N; j++){
-    //         now = now + cpu_scalars[i + j] * cpu_pre[j];
+    //         now = now + cpu_scalars[i + j] * cpu_points[j];
     //     }
     //     assert(now == gpu_commit[i / N]);
     //     //printf("hello\n");
@@ -174,17 +160,17 @@ int main(int argc, char *argv[])
     // CUDA_TIMER_START(int_to_fr);
     // fr_t *value;
     // cudaMalloc((void **)&value, sizeof(fr_t) * size);
-    // int_to_fr<<<(size + 512 - 1) / 512, 512>>>(int_data, value, size);
+    // int_to_fr<<<(size + 512 - 1) / 512, 512>>>(tensor, value, size);
     // CUDA_DEBUG;
     // CUDA_TIMER_STOP(int_to_fr);
 
     
 
 
-    // cudaFree(commitment);
-    // cudaFree(int_data);
-    // cudaFree(out);
-    // cudaFree(value);
+    //cudaFree(commitment);
+    //cudaFree(tensor);
+    //cudaFree(points);
+    //cudaFree(value);
   
 
 

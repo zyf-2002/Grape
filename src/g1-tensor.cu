@@ -33,7 +33,7 @@ G1TensorJacobian::G1TensorJacobian(uint s, const affine_t* cpu_data)
 
 G1TensorJacobian::~G1TensorJacobian()
 {
-    cudaFree(gpu_data);
+   cudaFree(gpu_data);
     gpu_data = nullptr;
 }
 
