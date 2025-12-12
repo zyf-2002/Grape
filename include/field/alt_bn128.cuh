@@ -76,8 +76,10 @@ struct fr_t : public fr_mont {
 
 #include "curve/affine_t.cuh"
 #include "curve/jacobian_t.cuh"
+#include "curve/xyzz_t.cuh"
 
 namespace alt_bn128 {
     typedef Affine_t<fp_t> affine_t;
     typedef jacobian_t<fp_t> jacob_t;
+    typedef xyzz_t<fp_t> bucket_t;
 }

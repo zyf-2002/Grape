@@ -209,7 +209,7 @@ public:
     }
 
     inline void set_uint(uint32_t p) {
-        for (size_t i = 0; i < n; i++) even[i] = 0;
+        for (size_t i = 1; i < n; i++) even[i] = 0;
         even[0] = p;
     }
 

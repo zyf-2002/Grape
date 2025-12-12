@@ -4,7 +4,7 @@
 #include "fr-tensor.cuh"
 #include "Hyrax.cuh"
 #include "g1-tensor.cuh"
-#include "msm.cuh"
+#include "ec_operation.cuh"
 #include <omp.h>
 
 using namespace std;

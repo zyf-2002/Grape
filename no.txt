@@ -23,3 +23,52 @@
 //     }
 
 //----------------------------------------------------------------------------------------------------------------------
+
+__global__ void __launch_bounds__(256, 2) Hyrax_commit_fr(fr_t* scalars, affine_t *point, jacob_t *out, 
+                                            uint npoints){
+
+    uint global_warp_id = GET_GLOBAL_WARP_ID();
+    uint lane_id = GET_LANE_ID();
+    unsigned int mask = (1 << 8) - 1;
+
+    out[global_warp_id].inf();
+    
+    for(int w = 31; w >=0; w--){
+        jacob_t sum; sum.inf();
+        for(int i = lane_id; i < npoints; i += 32){
+            fr_t s = scalars[global_warp_id * npoints + i];
+            s.from();
+            uint index = ((s[w / 4] >> ((w % 4) * 8)) & mask) * npoints + i;
+            affine_t tmp = point[index];
+            //if(index < npoints) assert(tmp.is_inf());
+            sum.add(tmp);
+        }
+        
+        __syncwarp();
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            sum.add(shfl_down_G1(sum, offset, 32, 0xffffffffu));
+        }
+        
+        __syncwarp();
+
+        if(lane_id == 0){
+            #pragma unroll
+            for(int bit = 0; bit < 8; bit++){
+                out[global_warp_id].dbl();
+            }
+            //if(w == 31) assert(out[global_warp_id].is_inf());
+            out[global_warp_id].add(sum);
+        }
+        
+    }
+    __syncthreads();
+}
+//----------------------------------------------------------------------------------------------------------------------
+for (int offset = 1; offset < 32; offset <<= 1) {
+        jacob_t other = shfl_down_G1(sum, offset, 32, 0xffffffffu);
+        if (lane_id + offset < 32) {
+            int shift_bits = offset * 8;     
+            for(int i = 0; i < shift_bits; i++) other.dbl();
+            sum.add(other);                  
+        }
+    }

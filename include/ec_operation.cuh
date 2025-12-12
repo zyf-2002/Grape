@@ -14,6 +14,20 @@ typedef ppT::Fp_type Fr;
 
 using namespace alt_bn128;
 
+__global__ void check_G_equal(const jacob_t *a,
+                                   const jacob_t *b,
+                                   int n)
+{
+    int idx = GET_GLOBAL_ID();
+    if (idx >= n) return;
+    jacob_t res;
+    res = b[idx];
+    res.cneg(1);
+    res.add(a[idx]);
+    assert(res.is_inf());
+}
+
+
 __global__ void naive_msm(jacob_t *P, affine_t *out, size_t N, size_t W){
 
     uint global_id = GET_GLOBAL_ID();

@@ -5,7 +5,9 @@
 using namespace std;
 
 #define GET_GLOBAL_ID() blockIdx.x * blockDim.x + threadIdx.x
-#define GET_WARP_ID() (blockIdx.x * blockDim.x + threadIdx.x) / 32
+
+#define GET_GLOBAL_WARP_ID() (blockIdx.x * blockDim.x + threadIdx.x) / 32
+#define GET_WARP_ID() threadIdx.x / 32
 #define GET_LANE_ID() (blockIdx.x * blockDim.x + threadIdx.x) % 32
 #define GET_TOTAL_THREADS() blockDim.x * gridDim.x
 

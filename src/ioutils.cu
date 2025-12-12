@@ -45,7 +45,10 @@ void loadbin(const string& filename, void* gpudata, ulong size)
 {
     // Allocate memory
 
-    void* data = malloc(size);
+    //void* data = malloc(size);
+    void* data;
+    cudaMallocHost(&data, size);
+
     FILE* file = fopen(filename.c_str(), "rb");
 
     if (!file) {
@@ -57,10 +60,12 @@ void loadbin(const string& filename, void* gpudata, ulong size)
     fclose(file);
     
     // Copy data from CPU to GPU
+    CUDA_TIMER_START(cpy);
     cudaMemcpy(gpudata, data, size, cudaMemcpyHostToDevice);
+    CUDA_TIMER_STOP(cpy);
 
     // Free memory
-    free(data);
+    cudaFreeHost(data);
 
 }
 

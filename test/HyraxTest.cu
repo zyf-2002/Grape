@@ -4,7 +4,7 @@
 #include "fr-tensor.cuh"
 #include "Hyrax.cuh"
 #include "g1-tensor.cuh"
-#include "msm.cuh"
+#include "ec_operation.cuh"
 #include <omp.h>
 
 using namespace std;
@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
     cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
 
     int *tensor;
-    string filename = "../data/X_up_rem.bin";
+    string filename = "../data/X_up.bin";
     CPU_TIMER_START(load_data);
     auto size = findsize(filename) / sizeof(int);
     cout << "size: " << size << endl;   
@@ -40,10 +40,19 @@ int main(int argc, char *argv[])
 
     Hyrax hyrax(size, N, points, cpu_points[0]);
 
-    CUDA_TIMER_START(Hyrax_commit);
+    FrTensor fr_tensor(size, tensor);
+    CPU_TIMER_START(commit);
     jacob_t *commitment = hyrax.commit(tensor);
     CUDA_DEBUG;
-    CUDA_TIMER_STOP(Hyrax_commit); 
+    CPU_TIMER_STOP(commit);
+
+    CPU_TIMER_START(commit_fr);
+    jacob_t *commitment1 = hyrax.commit(fr_tensor);
+    CUDA_DEBUG;
+    CPU_TIMER_STOP(commit_fr);
+
+    check_G_equal<<<(size / N) / 128, 128>>>(commitment1, commitment, size / N);
+
 
     cout<<"----------------------------------"<<"commit done"<< "----------------------------------"<<endl;
 
@@ -55,11 +64,10 @@ int main(int argc, char *argv[])
     }
     
     Fr c = Fr::random_element();
-    CUDA_TIMER_START(Hyrax_open)
+    CPU_TIMER_START(open);
     auto proof = hyrax.open(tensor, eval_point, c);
     CUDA_DEBUG;
-    CUDA_TIMER_STOP(Hyrax_open)
-
+    CPU_TIMER_STOP(open);
 
     cout<<"----------------------------------"<<"open_proof done"<< "----------------------------------"<<endl;
 
@@ -104,9 +112,11 @@ int main(int argc, char *argv[])
     bn128 right = az * cpu_points[0];
     assert(left == right);
     
+    CUDA_DEBUG;
+    
     CPU_TIMER_STOP(verify);
 
-    CUDA_DEBUG;
+    
     cout<<"----------------------------------"<<"verify done"<< "----------------------------------"<<endl;
 
 
