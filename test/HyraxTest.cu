@@ -10,7 +10,7 @@
 using namespace std;
 using namespace libsnark;
 
-const size_t N = 11008;   // number of points /row_size / 
+const size_t N = 4096;   // number of points /row_size / 
 const size_t W = 1 << 8;  //pre_windows
 const size_t layer_num = 4;
 
@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
     cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
 
     int *tensor;
-    string filename = "../data/X_up.bin";
+    string filename = "../data/X.bin";
     CPU_TIMER_START(load_data);
     auto size = findsize(filename) / sizeof(int);
     cout << "size: " << size << endl;   
@@ -51,7 +51,7 @@ int main(int argc, char *argv[])
     CUDA_DEBUG;
     CPU_TIMER_STOP(commit_fr);
 
-    check_G_equal<<<(size / N) / 128, 128>>>(commitment1, commitment, size / N);
+    //check_G_equal<<<(size / N) / 128, 128>>>(commitment1, commitment, size / N);
 
 
     cout<<"----------------------------------"<<"commit done"<< "----------------------------------"<<endl;

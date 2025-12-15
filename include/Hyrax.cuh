@@ -18,7 +18,7 @@ __device__ __forceinline__ fp_t shfl_down_Fp(
     fp_t r;
     #pragma unroll
     for (int i = 0; i < 8; ++i) {
-        r[i] = __shfl_down_sync(mask, a[i], offset, 32);
+        r[i] = __shfl_down_sync(mask, a[i], offset, width);
     }
     return r;
 }
@@ -36,7 +36,21 @@ __device__ __forceinline__ jacob_t shfl_down_G1(
     return r;
 }
 
-__global__ void __launch_bounds__(512, 1) Hyrax_commit_int(int* scalars, affine_t *point, jacob_t *out, 
+__device__ __forceinline__ bucket_t shfl_down_xyzz(
+    const bucket_t &p,
+    unsigned int offset,
+    int width,
+    unsigned mask)
+{
+    fp_t X = shfl_down_Fp(p.getX(), offset, width, mask);
+    fp_t Y = shfl_down_Fp(p.getY(), offset, width, mask);
+    fp_t ZZZ = shfl_down_Fp(p.getZZZ(), offset, width, mask);
+    fp_t ZZ = shfl_down_Fp(p.getZZ(), offset, width, mask);
+    bucket_t r(X, Y, ZZZ, ZZ);
+    return r;
+}
+
+__global__ void __launch_bounds__(128, 3) int_windows_sum(int* scalars, affine_t *point, jacob_t *out, 
                                             uint N, uint npoints){
 
     assert(GET_TOTAL_THREADS() == (N / npoints) * 32);
@@ -44,38 +58,41 @@ __global__ void __launch_bounds__(512, 1) Hyrax_commit_int(int* scalars, affine_
     uint lane_id = GET_LANE_ID();
     unsigned int mask = (1 << 8) - 1;
 
-    out[global_warp_id].inf();
     
     for(int w = 3; w >=0; w--){
-        jacob_t sum; sum.inf();
+        bucket_t sum; sum.inf();
         for(int i = lane_id; i < npoints; i += 32){
             bool is_neg = scalars[global_warp_id * npoints + i] < 0 ? 1 : 0;
             uint s = abs(scalars[global_warp_id * npoints + i]);
-            uint index = ((s >> (w * 8)) & mask) * npoints + i;
-            affine_t tmp = point[index];
-            if(index < npoints) assert(tmp.is_inf());
+            uint index = reinterpret_cast<uint8_t*>(&s)[w];
+            affine_t tmp = point[index * npoints + i];
             tmp.cneg(is_neg);
             sum.add(tmp);
         }
-        
-        __syncwarp();
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            sum.add(shfl_down_G1(sum, offset, 32, 0xffffffffu));
-        }
-        
-        __syncwarp();
-
-        if(lane_id == 0){
-            #pragma unroll
-            for(int bit = 0; bit < 8; bit++){
-                out[global_warp_id].dbl();
-            }
-            if(w == 3) assert(out[global_warp_id].is_inf());
-            out[global_warp_id].add(sum);
-        }
-        
+        sum.to_jacobian();
+        out[global_warp_id * 128 + w * 32 + lane_id] = *reinterpret_cast<jacob_t*>(&sum);
     }
+}
+
+__global__ void int_windows_reduce(jacob_t *in, jacob_t *out){
+    __shared__ jacob_t sm[128];
+    uint lane_id = threadIdx.x % 4;
+    uint global_warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 4; 
+    jacob_t sum; sum.inf();
+    for(int i = 0; i < 32; i++){
+        sum.add(in[global_warp_id * 128 + lane_id * 32 + i]);
+    }
+
+    for(int i = 0; i < lane_id * 8; i++)  sum.dbl();
+    sm[threadIdx.x] = sum;
     __syncthreads();
+   
+    if(lane_id == 0){
+        sum.add(sm[threadIdx.x + 1]);
+        sum.add(sm[threadIdx.x + 2]);
+        sum.add(sm[threadIdx.x + 3]);
+        out[global_warp_id] = sum;
+    }
 }
 
 __global__ void single_windows_sum(fr_t* scalars, affine_t *point, jacob_t *out, 
@@ -116,7 +133,7 @@ __global__ void single_windows_reduce(jacob_t *in, jacob_t *out, uint num){
 
 }
 
-__global__ __launch_bounds__(128, 2) void many_windows_sum(fr_t* scalars, affine_t *point, jacob_t *out, uint npoints){
+__global__ void many_windows_sum(fr_t* scalars, affine_t *point, jacob_t *out, uint npoints){
     uint lane_id = GET_LANE_ID();
     uint warp_id = GET_WARP_ID();
     unsigned int mask = (1 << 8) - 1;
@@ -306,8 +323,17 @@ jacob_t* Hyrax::commit(int *tensor) {
     jacob_t *commitment;
     cudaMalloc(&commitment, sizeof(jacob_t) * (size / N));
 
+    jacob_t *tmp_out;
+    cudaMalloc(&tmp_out, sizeof(jacob_t) * (size / N) * 32 * 4);
+
     uint thread = (size / N) * 32;
-    Hyrax_commit_int<<<(thread + 512 - 1) / 512, 512>>>(tensor, g_affine, commitment, size, N);
+    //CUDA_TIMER_START(int_window_sum);
+    int_windows_sum<<<(thread + 128 - 1) / 128, 128>>>(tensor, g_affine, tmp_out, size, N);
+    //CUDA_TIMER_STOP(int_window_sum);
+
+    thread = (size / N) * 4;
+    int_windows_reduce<<<(thread + 128 - 1) / 128, 128>>>(tmp_out, commitment);
+    cudaFree(tmp_out);
     return commitment;
 }
 

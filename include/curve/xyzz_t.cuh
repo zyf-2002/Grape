@@ -20,11 +20,22 @@ public:
     static const unsigned int degree = field_t::degree;
 
     xyzz_t() = default;
+    inline __device__ xyzz_t(const field_t& x, const field_t& y, const field_t& zzz, const field_t& zz) :
+                                                   X(x),             Y(y),
+                                                   ZZZ(zzz),
+                                                   ZZ(zz) {}
+
     inline __host__ __device__ xyzz_t(const field_t& x, const field_t& y, bool is_inf) :
                                                    X(x),             Y(y),
                                                    ZZZ(field_t::one(is_inf)),
                                                    ZZ(ZZZ) {}
 	inline __device__ void to_jacobian() { ZZZ /= ZZ; }
+
+    __host__ __device__ field_t getX() const { return X; }
+    __host__ __device__ field_t getY() const { return Y; }
+    __host__ __device__ field_t getZZZ() const { return ZZZ; }
+    __host__ __device__ field_t getZZ() const { return ZZ; }
+
 
 #ifdef __CUDACC__
     class mem_t { friend class xyzz_t;
@@ -75,7 +86,7 @@ public:
         return *this;
     }
 
-    inline __host__ operator affine_t() const
+    inline __host__ __device__ operator affine_t() const
     {
         field_t ya = 1/ZZZ;
         field_t xa = ya * ZZ;   // 1/Z
