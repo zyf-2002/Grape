@@ -562,6 +562,12 @@ public:
         return is_zero == 0;
     }
 
+    static inline mont_t get_zero() {
+        mont_t r;
+        r.zero();
+        return r;
+    }
+
     inline void zero()
     {
         if (n%4 == 0) {

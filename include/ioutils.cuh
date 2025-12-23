@@ -1,6 +1,9 @@
 #pragma once
 #include <iostream>
 #include <string>
+#include <random>
+#include <limits>
+#include <vector>
 
 using namespace std;
 
@@ -52,3 +55,5 @@ void loadbin(const string& filename, void* gpudata, ulong size);
 uint Log2(uint num);
 
 uint load_data(const string& filename, int **out_ptr);
+
+void generate_data(int **out_ptr, uint size);

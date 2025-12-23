@@ -50,7 +50,7 @@ __device__ __forceinline__ bucket_t shfl_down_xyzz(
     return r;
 }
 
-__global__ void __launch_bounds__(128, 3) int_windows_sum(int* scalars, affine_t *point, jacob_t *out, 
+__global__ void __launch_bounds__(128, 1) int_windows_sum(int* scalars, affine_t *point, jacob_t *out, 
                                             uint N, uint npoints){
 
     assert(GET_TOTAL_THREADS() == (N / npoints) * 32);
@@ -266,14 +266,14 @@ Hyrax_proof Hyrax::open(int *tensor, vector<Fr> eval_point_, Fr c){
     FrTensor x(N);
 
     CPU_TIMER_START(calculate_a);
-    fr_tensor.partial_me(size, eval_point, (size / layer) / N, Log2(N), N);
-    fr_tensor.partial_me(N * layer, eval_point, layer, Log2(size / layer), N);
+    fr_tensor.partial_eval(size, eval_point, (size / layer) / N, Log2(N), N);
+    fr_tensor.partial_eval(N * layer, eval_point, layer, Log2(size / layer), N);
     x = fr_tensor;
     CPU_TIMER_STOP(calculate_a);
     
     Fr result;
     CPU_TIMER_START(calculate_result);
-    fr_tensor.partial_me(N, eval_point, N, 0, 1);
+    fr_tensor.partial_eval(N, eval_point, N, 0, 1);
     CPU_TIMER_STOP(calculate_result);
     
     cudaMemcpy(&result, fr_tensor.gpu_data, sizeof(fr_t), cudaMemcpyDeviceToHost);
@@ -286,7 +286,7 @@ Hyrax_proof Hyrax::open(int *tensor, vector<Fr> eval_point_, Fr c){
     CPU_TIMER_STOP(calculate_z);
 
     CPU_TIMER_START(calculate_ad);
-    d.partial_me(d.size, eval_point, N, 0, 1);
+    d.partial_eval(d.size, eval_point, N, 0, 1);
     CPU_TIMER_STOP(calculate_ad);
     
     Fr sum_ad;
@@ -302,9 +302,9 @@ Hyrax_proof Hyrax::open(int *tensor, vector<Fr> eval_point_, Fr c){
     cudaMemcpy(proof.z, z.gpu_data, sizeof(fr_t) * N, cudaMemcpyDeviceToHost);
    
     // fr_tensor = tmp_value;
-    // fr_tensor.partial_me(size, eval_point, N, 0, 1);
-    // fr_tensor.partial_me(size / N, eval_point, 4, Log2(size / 4), 1024);
-    // fr_tensor.partial_me(1024, eval_point, 1024, Log2(N), 1);
+    // fr_tensor.partial_eval(size, eval_point, N, 0, 1);
+    // fr_tensor.partial_eval(size / N, eval_point, 4, Log2(size / 4), 1024);
+    // fr_tensor.partial_eval(1024, eval_point, 1024, Log2(N), 1);
     // Fr kk;
     // cudaMemcpy(&kk, fr_tensor.gpu_data, sizeof(fr_t), cudaMemcpyDeviceToHost);
     // assert(kk == result);

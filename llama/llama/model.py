@@ -586,11 +586,8 @@ class FeedForward(nn.Module):
 
             save_int(w1_int, f'../data/W/gate_layer.bin')
             save_int(w2_int, f'../data/W/down_layer.bin')
-            save_int(w3_int.t(), f'../data/W/up_layer.bin')
+            save_int(w3_int, f'../data/W/up_layer.bin')
             save_int(x_int, f'../data/X.bin')
-        
-        
-        
         
         
         temp_x1 = torch.matmul(x_int.to(torch.float64), w1_int.t().to(torch.float64)).to(torch.int64)
@@ -602,33 +599,12 @@ class FeedForward(nn.Module):
         q_temp_x3 = ((temp_x3 + SCALE//2) // SCALE).to(torch.int32)
         rem_temp_x3 = (temp_x3 - q_temp_x3 * SCALE).to(torch.int32)
         
-        
-        
+    
         # print(q_temp_x3.shape)
         if layer_num > 28:
             save_int(q_temp_x3, f'../data/X_up.bin')
             save_int(rem_temp_x3, f'../data/X_up_rem.bin')
-            # y_quot = load_int('../data/X_up.bin')
-            # y_quot = y_quot.reshape(1, 1024, 11008) 
-            # print(y_quot.shape)
-            # if torch.equal(y_quot, q_temp_x3):
-            #     print("✔️ 还原成功，完全一致！")
-                
-        # if layer_num > 28:
-        #     y_quot = load_int('../data/X_up.bin')
-        #     y_quot = y_quot.reshape(1024, 11008) 
-        #     y_rem = load_int('../data/X_up_rem.bin')
-        #     y_rem = y_rem.reshape(1024, 11008)
-        #     xx = load_int('../data/X.bin')
-        #     xx = xx.reshape(1024, 4096)
-        #     ww3 = load_int('../data/W/up_layer.bin')
-        #     ww3 = ww3.reshape(4096, 11008)
-        #     temp_test = torch.matmul(xx.to(torch.float64), ww3.t().to(torch.float64)).to(torch.int64)
-        #     reco_temp_x3 = (q_temp_x3.to(torch.int64)) * SCALE + rem_temp_x3
-        
-            # if torch.equal(reco_temp_x3, temp_test):
-            #     print("✔️ 还原成功，完全一致！")
-        
+            
         
         temp_x1 = (temp_x1 + SCALE//2) // SCALE
 
@@ -639,11 +615,20 @@ class FeedForward(nn.Module):
         temp_x13 = ((temp_x1.to(torch.int64)) * (q_temp_x3.to(torch.int64)) + SCALE//2) // SCALE
         temp_x13 = temp_x13.to(torch.int32)
         #print(temp_x13.shape)
+        
+        if layer_num > 28:
+            save_int(temp_x13, f'../data/X1.bin')
         temp_x123 = torch.matmul(temp_x13.to(torch.float64), w2_int.t().to(torch.float64)).to(torch.int64)
         
-        temp_x123 = (temp_x123 + SCALE//2) // SCALE
-        #out = (temp_x123.to(torch.float64) / SCALE).to(torch.float16)
-        out = temp_x123.to(torch.int32)
+        q_temp_x123 = ((temp_x123 + SCALE//2) // SCALE).to(torch.int32)
+        rem_temp_x123 = (temp_x123 - q_temp_x123 * SCALE).to(torch.int32)
+        
+        #temp_x123 = (temp_x123 + SCALE//2) // SCALE
+        if layer_num > 28:
+            save_int(q_temp_x123, f'../data/X_down.bin')
+            save_int(rem_temp_x123, f'../data/X_down_rem.bin')
+        
+        out = q_temp_x123.to(torch.int32)
         
         #print("rms max abs:", out.to(torch.float64).abs().max().item())
         

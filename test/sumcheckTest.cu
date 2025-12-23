@@ -3,8 +3,8 @@
 #include <vector>
 #include "fr-tensor.cuh"
 #include "Hyrax.cuh"
-#include "g1-tensor.cuh"
 #include "ec_operation.cuh"
+#include "prove.cuh"
 #include <omp.h>
 
 using namespace std;
@@ -12,49 +12,6 @@ using namespace libsnark;
 
 uint layer_num = 4;
 uint SCALE = 1 << 16;
-__global__ void equall(fr_t *a, fr_t *b, uint size){
-    for(int i=0; i < size; i++){
-        fr_t now = a[i] - b[i];
-        assert(now.is_zero());
-    }
-}
-// __global__ void test_kernel(fr_t *a, fr_t *b, fr_t *c, uint size1, uint size2, uint size3, uint layer)
-// {
-//     uint gid = blockIdx.x * blockDim.x + threadIdx.x;
-//     if(gid >= size1 * size2 * 2) return;
-//     for(int i=0; i < layer; i++){
-//         fr_t now; now.zero();
-        
-        
-//         uint j = (gid / size2) % size1;
-//         uint k = gid % size2;
-
-//         for(int l=0; l < size3; l++){
-//             now += a[i * size1 * size3 + j * size3 + l] * b[i * size2 * size3 + l * size2 + k];
-                    
-//         }
-//         now -= c[i * size1 * size2 + j * size2 + k];
-//         if(now.is_zero()) printf("pass\n");
-//         assert(now.is_zero());
-//     }
-    
-// }
-
-__global__ void test_kernel(fr_t *a, fr_t *b, fr_t *c, uint size)
-{
-    fr_t now; 
-    for(int i=0; i < 10; i++){
-        now.zero();
-        for(int j=0; j < size; j++){
-            now = now + a[j] * b[j * 11008 + i];
-        }
-        now -= c[i];
-        assert(now.is_zero());
-        printf("pass\n");
-        
-    }
-    
-}
 
 int main()
 {
@@ -94,7 +51,7 @@ int main()
     tmp = (tmp * up_size) / y_size / layer_num;
     uint same_size = sqrt(tmp);
     vector<Fr> v;
-    v.resize(Log2(same_size));
+    v.resize(Log2(same_size * layer_num));
     cout << "u_size: " << u.size() << " " << "v_size: " << v.size() << endl;
 
     for(uint i = 0; i < u.size(); i++) u[i] = Fr::random_element();
@@ -105,6 +62,7 @@ int main()
     cudaMalloc(&V, sizeof(fr_t) * v.size());
     cudaMemcpy(U, u.data(), sizeof(fr_t) * u.size(), cudaMemcpyHostToDevice);
 
+
     cout <<"--------------------------------------------------------------------" << endl;
     CUDA_TIMER_START(verify);
 
@@ -112,44 +70,37 @@ int main()
     cout << "y_dim2: " << y_dim2 << endl;
 
 
-    //test_kernel<<<1, 1>>>(x.gpu_data, up.gpu_data, y.gpu_data, 4096);
-    //CUDA_DEBUG;
+
+    y.partial_eval(y_size, U, y_size / y_dim2, Log2(y_dim2), y_dim2);
+    y.partial_eval(y_dim2, U, y_dim2, 0, 1);
+    // x.partial_eval(x_size, U, x_size / same_size / layer_num, Log2(y_dim2), same_size);
+    // up.partial_eval(up_size, U, y_dim2, 0, same_size);
+    // x.mul_with_size(same_size * layer_num, up);
+    // x.partial_eval(layer_num * same_size, U, layer_num, Log2(y_size / layer_num), same_size);
+
+    Fr claim;
+    cudaMemcpy(&claim, y.gpu_data, sizeof(Fr), cudaMemcpyDeviceToHost);  
+
+    MatMulSumcheckWorkTmp matmul_tmp(layer_num);
+
+    CPU_TIMER_START(prove_matmul);
+    prove_matmul(x, up, matmul_tmp, layer_num, y.size / layer_num / y_dim2, y_dim2, same_size, u, v, claim);
+    CUDA_DEBUG;
+    CPU_TIMER_STOP(prove_matmul);
 
     
-    y.partial_me(y_size, U, y_size / y_dim2, Log2(y_dim2), y_dim2);
-    y.partial_me(y_dim2, U, y_dim2, 0, 1);
-    x.partial_me(x_size, U, x_size / same_size / layer_num, Log2(y_dim2), same_size);
-    up.partial_me(up_size, U, y_dim2, 0, 1);
-    //up.partial_me(up_size / y_dim2, U, layer_num, Log2(y_size / layer_num), same_size);
+   
+ 
+    // Fr *host_x = new Fr[same_size];
+    // cudaMemcpy(host_x, x.gpu_data, sizeof(Fr) * same_size, cudaMemcpyDeviceToHost);
+    // Fr now = Fr::zero();
+    // for(int i = 0; i < same_size; i++) now += host_x[i];
+    // Fr now1;
+    // cudaMemcpy(&now1, y.gpu_data, sizeof(Fr), cudaMemcpyDeviceToHost);  
+    // assert(now == now1);
 
-    x.mul_with_size(same_size * layer_num, up);
-
-    x.partial_me(layer_num * same_size, U, layer_num, Log2(y_size / layer_num), same_size);
-
-
-    // y.partial_me(y_size, U, layer_num, Log2(y_size / layer_num), y_size / layer_num);
-    // x.partial_me(x_size, U, layer_num, Log2(y_size / layer_num), x_size / layer_num);
-    // up.partial_me(up_size, U, layer_num, Log2(y_size / layer_num), up_size / layer_num);
-
-
-    // test_kernel<<<1 , 1>>>(x.gpu_data, up.gpu_data, y.gpu_data, 4096);
     // CUDA_DEBUG;
-    
-
-    // x.mul_with_size(same_size, up);
-
-    CUDA_DEBUG;
-
-    Fr *host_x = new Fr[same_size];
-    cudaMemcpy(host_x, x.gpu_data, sizeof(Fr) * same_size, cudaMemcpyDeviceToHost);
-    Fr now = Fr::zero();
-    for(int i = 0; i < same_size; i++) now += host_x[i];
-    Fr now1;
-    cudaMemcpy(&now1, y.gpu_data, sizeof(Fr), cudaMemcpyDeviceToHost);  
-    assert(now == now1);
-
-    CUDA_DEBUG;
-    CUDA_TIMER_STOP(verify);
+    // CUDA_TIMER_STOP(verify);
 
 
     cudaFree(x_data);
@@ -158,6 +109,6 @@ int main()
     cudaFree(y_rem_data);
     cudaFree(U);
     cudaFree(V);
-    delete [] host_x;
+    //delete [] host_x;
 
 }

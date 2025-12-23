@@ -72,9 +72,35 @@ void loadbin(const string& filename, void* gpudata, ulong size)
 uint load_data(const string& filename, int **out_ptr){
     auto size = findsize(filename) / sizeof(int);
     cout << filename << "size: " << size << endl;   
+    //size = size / 2;
     cudaMalloc((void **)out_ptr, sizeof(int) * size);
     loadbin(filename, *out_ptr, sizeof(int) * size);
     return size;
+}
+
+void generate_data(int **out_ptr, uint size) {
+    // 1. CPU buffer
+    std::vector<int> h_tensor(size);
+
+    // 2. 随机数引擎
+    std::mt19937 rng(123456);
+    std::uniform_int_distribution<int> dist(
+        std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max()
+    );
+
+    // 3. 生成均匀分布
+    for (uint i = 0; i < size; i++) {
+        h_tensor[i] = dist(rng);
+    }
+
+    // 4. 分配 GPU 内存（注意：是 *out_ptr）
+    cudaMalloc((void**)out_ptr, sizeof(int) * size);
+
+    // 5. 拷贝到 GPU（注意：是 *out_ptr）
+    cudaMemcpy(*out_ptr, h_tensor.data(),
+               sizeof(int) * size,
+               cudaMemcpyHostToDevice);
 }
 
 

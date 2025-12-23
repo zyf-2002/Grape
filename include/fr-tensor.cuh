@@ -35,7 +35,7 @@ __global__ void Memory_alignment(fr_t *t, uint gap){
     t[gid] = t[gid * gap];
 }
 
-__global__ void Fr_partial_me_kernel(fr_t *t, fr_t *x, uint dim, uint other_dims, uint in_cur_dim, uint out_cur_dim, uint id, uint window_size, uint gap){
+__global__ void Fr_partial_eval_kernel(fr_t *t, fr_t *x, uint dim, uint other_dims, uint in_cur_dim, uint out_cur_dim, uint id, uint window_size, uint gap){
     uint gid = GET_GLOBAL_ID();
     if (gid >= other_dims * out_cur_dim * window_size) return;
 
@@ -116,6 +116,40 @@ __global__ void to_kernel(fr_t *arr, uint size){
     arr[gid].to();
 }
 
+__global__ void inverse_kernel(fr_t *arr, uint size){
+    uint gid = GET_GLOBAL_ID();
+    if(gid >= size) return;
+    fr_t tmp = arr[gid].reciprocal();
+    arr[gid] = tmp;
+}
+
+__global__ void Fr_sum_reduction(fr_t *arr, fr_t *output, uint n) {
+    extern __shared__ fr_t frsum_sdata[];
+
+    unsigned int tid = threadIdx.x;
+    unsigned int i = blockIdx.x * (2 * blockDim.x) + threadIdx.x;
+
+    // Load input into shared memory
+    frsum_sdata[tid] = (i < n) ? arr[i] : fr_t::get_zero();
+    if (i + blockDim.x < n) frsum_sdata[tid] = frsum_sdata[tid] + arr[i + blockDim.x];
+
+    __syncthreads();
+
+    // Reduction in shared memory
+    for (unsigned int offset = blockDim.x / 2; offset >= 32; offset >>= 1) {
+        if (tid < offset) {
+            frsum_sdata[tid] = frsum_sdata[tid] + frsum_sdata[tid + offset];
+        }
+        __syncthreads();
+    }
+    for (uint offset = 16; offset > 0; offset >>= 1) {
+        if (tid < offset) frsum_sdata[tid] += frsum_sdata[tid + offset];
+        __syncwarp();
+    }
+
+    if (tid == 0) output[blockIdx.x] = frsum_sdata[0];
+}
+
 class FrTensor
 {   
     public:
@@ -127,16 +161,24 @@ class FrTensor
     ~FrTensor();
     FrTensor(uint size, int* cpu_data);
     FrTensor& operator=(const FrTensor& x);
-    void partial_me(uint N, fr_t *x, uint c, uint id, uint gap);
+    void partial_eval(uint N, fr_t *x, uint c, uint id, uint gap);
     FrTensor partial_me1(fr_t *x, uint id, uint gap);
+    void add_with_size(uint sz, const FrTensor& t);
     void mul_with_size(uint sz, const FrTensor& t);
+    void mul_with_size(uint sz, fr_t *x);
+    void mul_with_size(uint sz, Fr &x);
     FrTensor& operator+=(const FrTensor& t);
     FrTensor& operator*=(const FrTensor& t);
     FrTensor& operator*=(fr_t *x);
     FrTensor& operator*=(const uint x);
+    FrTensor& operator*=(Fr &x);
+    void inverse();
 
     void from();
     void to();
+
+    Fr sum(uint sz);
+    Fr operator()(uint idx) const;
 };
 
 FrTensor& FrTensor::operator*=(fr_t *x)
@@ -146,13 +188,25 @@ FrTensor& FrTensor::operator*=(fr_t *x)
     return *this;
 }
 
+FrTensor& FrTensor::operator*=(Fr &x)
+{
+    fr_t *d_x;
+    cudaMalloc(&d_x, sizeof(fr_t));
+    cudaMemcpy(d_x, &x, sizeof(fr_t), cudaMemcpyHostToDevice);
+    Fr_broadcast_mul<<<(size + 512 -1) / 512, 512>>>(gpu_data, d_x, gpu_data, size);
+    cudaFree(d_x);
+    cudaDeviceSynchronize();
+    return *this;
+}
+
 FrTensor& FrTensor::operator*=(const uint x)
 {
     Fr host_x = Fr(long(x));
     fr_t *d_x;
-    cudaMalloc((void **)&d_x, sizeof(fr_t));
+    cudaMalloc(&d_x, sizeof(fr_t));
     cudaMemcpy(d_x, &host_x, sizeof(fr_t), cudaMemcpyHostToDevice);
     Fr_broadcast_mul<<<(size + 512 -1) / 512, 512>>>(gpu_data, d_x, gpu_data, size);
+    cudaFree(d_x);
     cudaDeviceSynchronize();
     return *this;
 }
@@ -173,9 +227,32 @@ FrTensor& FrTensor::operator+=(const FrTensor& t)
     return *this;
 }
 
+void FrTensor::add_with_size(uint sz, const FrTensor& t)
+{
+    Fr_elementwise_add<<<(sz + 512 - 1) / 512 , 512>>>(gpu_data, t.gpu_data, gpu_data, sz);
+    cudaDeviceSynchronize();
+}
+
+
 void FrTensor::mul_with_size(uint sz, const FrTensor& t)
 {
     Fr_elementwise_mul<<<(sz + 512 - 1) / 512 , 512>>>(gpu_data, t.gpu_data, gpu_data, sz);
+    cudaDeviceSynchronize();
+}
+
+void FrTensor::mul_with_size(uint sz, fr_t *x)
+{
+    Fr_broadcast_mul<<<(sz + 512 - 1) / 512 , 512>>>(gpu_data, x, gpu_data, sz);
+    cudaDeviceSynchronize();
+}
+
+void FrTensor::mul_with_size(uint sz, Fr &x)
+{
+    fr_t *d_x;
+    cudaMalloc(&d_x, sizeof(fr_t));
+    cudaMemcpy(d_x, &x, sizeof(fr_t), cudaMemcpyHostToDevice);
+    Fr_broadcast_mul<<<(sz + 512 - 1) / 512 , 512>>>(gpu_data, d_x, gpu_data, sz);
+    cudaFree(d_x);
     cudaDeviceSynchronize();
 }
 
@@ -198,7 +275,8 @@ FrTensor::FrTensor(const FrTensor& t): size(t.size), gpu_data(nullptr)
 FrTensor& FrTensor::operator=(const FrTensor& t)
 {
     //if (size != t.size) throw std::runtime_error("operator=: Incompatible dimensions");
-    cudaMemcpy(gpu_data, t.gpu_data, sizeof(fr_t) * size, cudaMemcpyDeviceToDevice);
+    uint small_size = std::min(size, t.size);
+    cudaMemcpy(gpu_data, t.gpu_data, sizeof(fr_t) * small_size, cudaMemcpyDeviceToDevice);
     cudaDeviceSynchronize();
     return *this;
 }
@@ -235,7 +313,7 @@ void Fr_partial_me(uint N, const FrTensor& t, fr_t *x, uint id, uint cur_dim, ui
         uint other_dims = out_size / (cur_dim_in * window_size);
         out_size = other_dims * cur_dim_out * window_size;
 
-        Fr_partial_me_kernel<<<(out_size + 512 -1) / 512, 512>>>(t.gpu_data, x, dim, other_dims, cur_dim_in, cur_dim_out, id, window_size, gap);
+        Fr_partial_eval_kernel<<<(out_size + 512 -1) / 512, 512>>>(t.gpu_data, x, dim, other_dims, cur_dim_in, cur_dim_out, id, window_size, gap);
         cudaDeviceSynchronize();
         id += 1;
         gap = gap << 1;
@@ -249,10 +327,10 @@ FrTensor FrTensor::partial_me1(fr_t *x, uint id, uint gap)
     return Fr_partial_me1(*this, x, id, gap);
 }
 
-void FrTensor::partial_me(uint N, fr_t *x, uint c, uint id, uint gap)  //N是需要操作的空间长度，N不一定等于size
+void FrTensor::partial_eval(uint N, fr_t *x, uint c, uint id, uint gap)  //N是需要操作的空间长度，N不一定等于size
 {
     Fr_partial_me(N, *this, x, id, c, gap);
-    CPU_TIMER_START(move);
+    //CPU_TIMER_START(move);
     if(gap == 1 && (N != c)){
         uint thread = (N / c) > 512 ? 512 : (N / c);
         Memory_alignment<<<((N / c) + 512 -1) / 512, thread>>>(gpu_data, c);
@@ -263,7 +341,7 @@ void FrTensor::partial_me(uint N, fr_t *x, uint c, uint id, uint gap)  //N是需
             cudaMemcpy(gpu_data + i * gap, gpu_data + i * c * gap , sizeof(fr_t) * gap, cudaMemcpyDeviceToDevice);
         }
     }
-    CPU_TIMER_STOP(move);
+    //CPU_TIMER_STOP(move);
     //CUDA_DEBUG;
 }
 
@@ -303,5 +381,50 @@ void FrTensor::to()
     CUDA_TIMER_STOP(to_mont);
     
 }
+
+void FrTensor::inverse()
+{
+    inverse_kernel<<<(size + 256 - 1) / 256 , 256>>>(gpu_data, size);
+    cudaDeviceSynchronize();
+}
+
+Fr FrTensor::sum(uint sz)
+{
+    fr_t *ptr_input, *ptr_output;
+    uint curSize = sz;
+    uint gridSize = (curSize + 256 - 1) / 256;
+    cudaMalloc((void**)&ptr_output, gridSize * sizeof(fr_t));
+    fr_t *free_pointer;
+    free_pointer = ptr_output;
+    ptr_input = gpu_data;
+
+    while(curSize > 1) {
+        Fr_sum_reduction<<<gridSize, 256, 2 * sizeof(fr_t) * 256>>>(ptr_input, ptr_output, curSize);
+        cudaDeviceSynchronize(); 
+        
+        // Swap pointers. Use the output from this step as the input for the next step.
+        fr_t *temp = ptr_input;
+        ptr_input = ptr_output;
+        ptr_output = temp;
+        
+        curSize = gridSize;  // The output size is equivalent to the grid size used in the kernel launch
+
+        gridSize = (curSize + 256 - 1) / 256;
+    }
+    Fr out;
+    cudaMemcpy(&out, ptr_input, sizeof(Fr), cudaMemcpyDeviceToHost);
+    cudaFree(free_pointer);
+    return out;
+}
+
+Fr FrTensor::operator()(uint idx) const
+{
+    Fr out;
+    cudaMemcpy(&out, gpu_data + idx, sizeof(Fr), cudaMemcpyDeviceToHost);
+    return out;
+}
+
+
+
 
 

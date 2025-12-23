@@ -3,14 +3,13 @@
 #include <vector>
 #include "fr-tensor.cuh"
 #include "Hyrax.cuh"
-#include "g1-tensor.cuh"
 #include "ec_operation.cuh"
 #include <omp.h>
 
 using namespace std;
 using namespace libsnark;
 
-const size_t N = 4096;   // number of points /row_size / 
+const size_t N = 11008;   // number of points /row_size / 
 const size_t W = 1 << 8;  //pre_windows
 const size_t layer_num = 4;
 
@@ -27,12 +26,12 @@ int main(int argc, char *argv[])
     cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
 
     int *tensor;
-    string filename = "../data/X.bin";
+    string filename = "../data/X_up.bin";
     CPU_TIMER_START(load_data);
+    //uint size = load_data(filename, &tensor);
+
     auto size = findsize(filename) / sizeof(int);
-    cout << "size: " << size << endl;   
-    cudaMalloc((void **)&tensor, sizeof(int) * size);
-    loadbin(filename, tensor, sizeof(int) * size);
+    generate_data(&tensor, size);
     CUDA_DEBUG;
     CPU_TIMER_STOP(load_data);
 
@@ -41,6 +40,9 @@ int main(int argc, char *argv[])
     Hyrax hyrax(size, N, points, cpu_points[0]);
 
     FrTensor fr_tensor(size, tensor);
+    //fr_tensor.inverse();
+    CUDA_DEBUG;
+
     CPU_TIMER_START(commit);
     jacob_t *commitment = hyrax.commit(tensor);
     CUDA_DEBUG;
@@ -51,7 +53,7 @@ int main(int argc, char *argv[])
     CUDA_DEBUG;
     CPU_TIMER_STOP(commit_fr);
 
-    //check_G_equal<<<(size / N) / 128, 128>>>(commitment1, commitment, size / N);
+    check_G_equal<<<(size / N) / 128, 128>>>(commitment1, commitment, size / N);
 
 
     cout<<"----------------------------------"<<"commit done"<< "----------------------------------"<<endl;
