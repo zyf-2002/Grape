@@ -34,7 +34,7 @@ int main()
     X.get_data(size, tensor);
     auto v1 = random_vec(Log2(size));
     CPU_TIMER_START(combine);
-    combine_claims(X, {claim1, claim2}, {u1, u2}, v1, 2, size);
+    combine_claims(X, {claim1, claim2}, {u1, u2}, v1, size);
     CUDA_DEBUG;
     CPU_TIMER_STOP(combine);
 

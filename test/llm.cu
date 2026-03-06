@@ -182,7 +182,7 @@ int main(int argc, char* argv[])
     if(proof.result != up_pair.second) printf("no\n");
     
     assert(proof.result == up_pair.second);
-    Fr norm_first_out_value1 = up_pair.first;
+    Fr norm_second_out_value1 = up_pair.first;
    
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
@@ -216,14 +216,15 @@ int main(int argc, char* argv[])
     ReassembleVectors(eval_point1, eval_point3, Log2(input_tokens), Log2(dim), Log2(max_embed_dim));
     proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim, layer_num);
     assert(proof.result == gate_pair.second);
-    Fr norm_first_out_value2 = gate_pair.first;
+    Fr norm_second_out_value2 = gate_pair.first;
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
     // -------------------------------unlock eval_point2----------------------------------
    
     timer.start();
     generate_random_eval_points(dim * layer_num * input_tokens, eval_point3);
-    Fr normFirstOut_value = combine_claims(tmp_tensor, {norm_first_out_value1, norm_first_out_value2}, {eval_point2, eval_point1}, eval_point3, 2, dim * layer_num * input_tokens);
+    Fr normSecondOut_value = combine_claims(tmp_tensor, {norm_second_out_value1, norm_second_out_value2}, 
+                                {eval_point2, eval_point1}, eval_point3, dim * layer_num * input_tokens);
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
 
@@ -234,7 +235,7 @@ int main(int argc, char* argv[])
     lookup_value = rs.prove(tensor1, tensor2, eval_point3, hyrax, dim);
     proof = hyrax.open(tensor3, eval_point3, c, data_size1, data_size1 / layer_num / input_tokens, layer_num);
     assert(proof.result == lookup_value);
-    normFirstOut_value = normFirstOut_value * SCALE1 + lookup_value;
+    normSecondOut_value = normSecondOut_value * SCALE1 + lookup_value;
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
 
@@ -248,7 +249,7 @@ int main(int argc, char* argv[])
     generate_random_eval_points(data_size1, eval_point1);  //skip combine_claims need eval_point1
     tensor3.set_size(data_size2);  tensor3 = tensor2;
     
-    auto norm_pair = prove_eleMul(tensor1, tensor2, layer_num, input_tokens, dim, eval_point3, eval_point1, normFirstOut_value);
+    auto norm_pair = prove_eleMul(tensor1, tensor2, layer_num, input_tokens, dim, eval_point3, eval_point1, normSecondOut_value);
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
     //-------------------------------------------lock tmp_tensor----------------------------------
@@ -279,7 +280,7 @@ int main(int argc, char* argv[])
     assert(proof.result == rmsw_pair.second);
 
     tensor1.get_data(data_size1, read_tensor1);
-    proof = hyrax.open(tensor1, eval_point2, c, data_size1, input_tokens, layer_num);
+    proof = hyrax.open(tensor1, eval_point2, c, data_size1, input_tokens, layer_num);   //这两个tensor都是一行的，open函数 N = 单层tensor的长度
     assert(proof.result == rmsw_pair.first);
 
     CUDA_DEBUG;
@@ -288,7 +289,8 @@ int main(int argc, char* argv[])
     // -------------------------------------------unlock tmp_tensor----------------------------------
     timer.start();
     generate_random_eval_points(dim * layer_num * input_tokens, eval_point2);
-    skip_value = combine_claims(tmp_tensor, {skip_value, norm_pair.first}, {skip_eval_point, eval_point1}, eval_point2, 2, dim * layer_num * input_tokens);
+    skip_value = combine_claims(tmp_tensor, {skip_value, norm_pair.first}, {skip_eval_point, eval_point1}, 
+                                        eval_point2, dim * layer_num * input_tokens);
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
 
@@ -457,7 +459,7 @@ int main(int argc, char* argv[])
     ReassembleVectors(eval_point1, eval_point3, Log2(input_tokens), Log2(dim), Log2(dim));
     proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim, layer_num);
     assert(proof.result == q_pair.second);
-    Fr norm_second_out1 = q_pair.first;
+    Fr norm_first_out1 = q_pair.first;
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
     // -------------------------------------------lock eval_point1----------------------------------//先把Q那一支证明完毕
@@ -487,7 +489,7 @@ int main(int argc, char* argv[])
     ReassembleVectors(eval_point2, eval_point3, Log2(input_tokens), Log2(dim), Log2(dim));
     proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim, layer_num);
     assert(proof.result == k_pair.second);
-    Fr norm_second_out2 = k_pair.first;
+    Fr norm_first_out2 = k_pair.first;
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
     // -------------------------------------------lock eval_point2----------------------------------//先把Q那一支证明完毕
@@ -516,10 +518,19 @@ int main(int argc, char* argv[])
     ReassembleVectors(skip_eval_point, eval_point3, Log2(dim), Log2(dim), Log2(input_tokens));
     proof = hyrax.open(tensor1, skip_eval_point, c, data_size2, dim, layer_num);
     assert(proof.result == v_pair.first);
-    Fr norm_second_out3 = v_pair.second;
+    Fr norm_first_out3 = v_pair.second;
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
 
+    // -------------------------------------------unlock eval_point1 and 2 ----------------------------------
+    data_size1 = load_data("../data/Q/normOutFirst-7.bin", &read_tensor1);
+    timer.start();
+    tensor1.get_data(data_size1, read_tensor1);
+    generate_random_eval_points(data_size1, skip_eval_point);
+    Fr normFirstOut_value = combine_claims(tensor1, {norm_first_out1, norm_first_out2, norm_first_out3}, 
+                                {eval_point1, eval_point2, eval_point3}, skip_eval_point, data_size1);
+    CUDA_DEBUG;
+    total_prove_time += timer.stop(" ");
 
 
     cout << "total_prove_time: " << total_prove_time << " S" << endl;

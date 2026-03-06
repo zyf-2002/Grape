@@ -52,4 +52,4 @@ std::pair<Fr, Fr> prove_eleMul(FrTensor &A, FrTensor &B,
                   const std::vector<Fr> u, const std::vector<Fr> v, Fr &claim);
 
 Fr combine_claims(FrTensor &X, const vector<Fr> &claims, 
-                const vector<vector<Fr>> &u, const vector<Fr> &v, const uint num, const uint size);
+                const vector<vector<Fr>> &u, const vector<Fr> &v, const uint size);

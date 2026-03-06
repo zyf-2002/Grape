@@ -238,9 +238,10 @@ std::pair<Fr, Fr> prove_eleMul(FrTensor &A, FrTensor &B,
 }
 
 Fr combine_claims(FrTensor &X, const vector<Fr> &claims, 
-                const vector<vector<Fr>> &u, const vector<Fr> &v, const uint num, const uint size){
+                const vector<vector<Fr>> &u, const vector<Fr> &v, const uint size){
 
     assert(size == (1 << Log2(size)));
+    uint num = claims.size();
     for(int i = 0; i < num; i++) assert(u[i].size() == v.size());
     assert((1 << v.size()) == size);
     Fr claim = Fr::zero();
