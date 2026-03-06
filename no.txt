@@ -79,3 +79,126 @@ inline __device__ xyzz_t(const field_t& x, const field_t& y, const field_t& zzz,
                                                    ZZZ(zzz),
                                                    ZZ(zz) 
 //----------------------------------------------------------------------------------------------------------------------
+void lasso_init(const int *query, uint *dim, uint *RS_count, uint *S_count, const int size, const int Lower_bound){
+
+    build_hist<<<(size + 255) / 256, 256>>>(query, S_count, size, Lower_bound);
+    CUDA_DEBUG;
+    
+    uint *idx = nullptr;
+    int* query_tmp = nullptr;   
+    uint* idx_tmp  = nullptr;   // 排序后的 index
+    void* temp    = nullptr;   //临时计算空间
+    uint* S_prefix;
+    size_t temp_bytes_sort = 0;
+    size_t temp_bytes_prefixsum = 0;
+
+    cudaMalloc(&S_prefix, 65536 * sizeof(uint));
+    cudaMalloc(&query_tmp, size * sizeof(int));   // 必须，但不用
+    cudaMalloc(&idx_tmp,  size * sizeof(uint));
+    cudaMalloc(&idx, size * sizeof(uint));
+
+    thrust::sequence(thrust::device, idx, idx + size);
+    // 3. 查询临时空间
+    cub::DeviceRadixSort::SortPairs(
+        nullptr, temp_bytes_sort,
+        query, query_tmp,
+        idx, idx_tmp,
+        size
+    );
+    cub::DeviceScan::ExclusiveSum(
+        nullptr, temp_bytes_prefixsum,
+        S_count, S_prefix,
+        65536
+    );
+    size_t temp_bytes = max(temp_bytes_sort, temp_bytes_prefixsum);
+
+    cudaMalloc(&temp, temp_bytes);
+    // 4. 真正排序
+    cub::DeviceRadixSort::SortPairs(
+        temp, temp_bytes,
+        query, query_tmp,
+        idx, idx_tmp,
+        size
+    );
+
+    cudaMemcpy(idx, idx_tmp, size * sizeof(uint), cudaMemcpyDeviceToDevice);
+
+    cub::DeviceScan::ExclusiveSum(
+        temp, temp_bytes,
+        S_count, S_prefix,
+        65536
+    );
+
+    get_rs_kernel<<<65536 / 256, 256>>>(idx, idx_tmp, S_prefix, S_count); //内存复用，idx_tmp先保存rs_count的结果
+
+    if(size != Log2(size)){    //如果输入的最后一个维度是11008
+        assert(size / 11008 < 65536);
+        uint pad_dim = 1 << Log2(size);
+        cudaMemset(idx, 0, size * sizeof(uint));
+        get_zero_hist<<<(size + 255) / 256, 256>>>(query, idx, 11008, size);  //idx 是内存复用，代表第i行0的个数
+
+        cub::DeviceScan::ExclusiveSum(
+            temp, temp_bytes,
+            idx, S_prefix,             //S_prefix是内存复用
+            size / 11008
+        );
+        uint zero_num;
+        cudaMemcpy(&zero_num, S_count, sizeof(uint), cudaMemcpyDeviceToHost);
+        zero_num += pad_dim - size;
+        cudaMemcpy(S_count, &zero_num, sizeof(uint), cudaMemcpyHostToDevice);
+        pad_rs<<<(pad_dim + 255) / 256, 256>>>(RS_count, idx_tmp, S_prefix, 11008, 16384, pad_dim);
+    }else{
+        cudaMemcpy(RS_count, idx_tmp, size * sizeof(uint), cudaMemcpyDeviceToDevice);
+    }
+
+    uint *rs_host = new uint[1 << Log2(size)];
+    cudaMemcpy(rs_host, RS_count, size * sizeof(uint), cudaMemcpyDeviceToHost);
+    uint *RS_host= new uint[1 << Log2(size)];
+    int *qh = new int[size];
+    cudaMemcpy(qh, query, size * sizeof(int), cudaMemcpyDeviceToHost);
+    uint *ct = new uint[65536];
+    memset(ct, 0, 65536 * sizeof(uint));
+    for(uint i = 0; i < (1 << Log2(size)); i++){
+        if(i % 16384 < 11008){
+            RS_host[i] = ct[qh[(i / 16384) * 11008 + (i % 16384)] - Lower_bound];
+            ct[qh[(i / 16384) * 11008 + (i % 16384)] - Lower_bound] ++;
+        }
+        else{
+            RS_host[i] = ct[0 - Lower_bound];
+            ct[0 - Lower_bound] ++;
+        }
+    }
+    
+    for(uint i = 0; i < (1 << Log2(size)); i++){
+        if(i % 16384 < 11008){
+            if(query[(i / 16384) * 11008 + (i % 16384)] != 0){
+                assert(RS_host[i] == rs_host[i]);
+            }
+        }
+        
+    }
+
+    
+    //get_dim_kernel<<<(size + 255) / 256, 256>>>(query, dim, size, Lower_bound);
+    cudaFree(idx);
+    cudaFree(query_tmp);
+    cudaFree(idx_tmp);
+    cudaFree(temp);
+    cudaFree(S_prefix);
+}
+
+//----------------------------------------------------------------------------------------------------------------------
+// Fr *ss = new Fr[S.size];
+        // Fr *host_s = new Fr[S.size];
+        // cudaMemcpy(host_s, S.gpu_data, sizeof(Fr) * S.size, cudaMemcpyDeviceToHost);
+        // #pragma omp parallel for
+        // for(int i = 0; i < S.size; i++){
+        //     ss[i] = host_s[i]
+        //     ss[i] += beta;
+        // }
+        // FrTensor AS(S.size);
+        // cudaMemcpy(AS.gpu_data, ss, sizeof(Fr) * S.size, cudaMemcpyHostToDevice);
+        // AS.mul_with_size(S.size, A);
+        // AS(u);
+        // Fr as_claim = AS(0) * alpha + A.sum(S.size);
+        // assert(as_claim + C == claim);

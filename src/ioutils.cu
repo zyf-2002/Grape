@@ -1,21 +1,41 @@
 #include "ioutils.cuh"
 
-void savebin(const string& filename, const void* gpudata, uint size)
+void savebin(const string& filename, const void* data, uint size, bool is_gpu_data)
 {
-    // Copy data from GPU to CPU
-    void* data = malloc(size);
-    cudaMemcpy(data, gpudata, size, cudaMemcpyDeviceToHost);
+    if (!data || size == 0) {
+        fprintf(stderr, "Error: Invalid input parameters\n");
+        return;
+    }
 
-    // Write data to file
+    void* host_data = nullptr;
+    
+    if (is_gpu_data) {
+        // GPU数据：先拷贝到CPU
+        host_data = malloc(size);
+        if (!host_data) {
+            fprintf(stderr, "Error: malloc failed\n");
+            return;
+        }
+        cudaMemcpy(host_data, data, size, cudaMemcpyDeviceToHost);
+    } else {
+        // CPU数据：直接使用
+        host_data = const_cast<void*>(data);
+    }
+    
+    // 打开文件并写入
     FILE* file = fopen(filename.c_str(), "wb");
-    fwrite(data, 1, size, file);
+    if (!file) {
+        fprintf(stderr, "Error: Failed to open file %s\n", filename.c_str());
+        if (is_gpu_data) free(host_data);
+        return;
+    }
+    
+    fwrite(host_data, 1, size, file);
     fclose(file);
     
-    // Free memory
-    free(data);
-
+    // 只有GPU数据需要释放
+    if (is_gpu_data) free(host_data);
 }
-
 ulong findsize(const string& filename)
 {
     FILE* file = fopen(filename.c_str(), "rb");
@@ -41,40 +61,86 @@ ulong findsize(const string& filename)
     return size;
 }
 
-void loadbin(const string& filename, void* gpudata, ulong size)
+void loadbin(const string& filename, void* data, ulong size, bool is_gpu_data)
 {
-    // Allocate memory
+    if (!data || size == 0) {
+        fprintf(stderr, "Error: Invalid input parameters\n");
+        return;
+    }
 
-    //void* data = malloc(size);
-    void* data;
-    cudaMallocHost(&data, size);
+    // 读取文件到CPU内存
+    void* host_data = malloc(size);
+    if (!host_data) {
+        fprintf(stderr, "Error: malloc failed\n");
+        return;
+    }
 
     FILE* file = fopen(filename.c_str(), "rb");
+    if (!file) {
+        perror(("Error opening file " + filename).c_str());
+        free(host_data);
+        return;
+    }
 
+    size_t read_count = fread(host_data, 1, size, file);
+    fclose(file);
+
+    if (read_count != size) {
+        fprintf(stderr, "Error: Read %zu bytes, expected %lu\n", read_count, size);
+        free(host_data);
+        return;
+    }
+
+    if (is_gpu_data) {
+        // GPU数据：拷贝到GPU
+        cudaMemcpy(data, host_data, size, cudaMemcpyHostToDevice);
+    } else {
+        // CPU数据：直接拷贝到CPU内存
+        memcpy(data, host_data, size);
+    }
+
+    free(host_data);
+}
+
+uint load_data(const string& filename, int **gpu_ptr){
+    auto size = findsize(filename) / sizeof(int);
+    //size = size / 2;
+    if (*gpu_ptr != nullptr) {
+        cudaFree(*gpu_ptr);
+        *gpu_ptr = nullptr;
+    }
+    cudaMalloc((void **)gpu_ptr, sizeof(int) * size);
+    int *cpu_ptr = (int*)malloc(sizeof(int) * size);
+    FILE* file = fopen(filename.c_str(), "rb");
+    if (!file) {
+        perror(("Error opening file " + filename).c_str());
+        exit(1);
+    }
+    fread(cpu_ptr, 1, size * sizeof(int), file);
+    fclose(file);
+
+    cudaMemcpy(*gpu_ptr, cpu_ptr, size * sizeof(int), cudaMemcpyHostToDevice);
+    free (cpu_ptr);
+    return size;
+}
+
+uint load_data(const string& filename, int **gpu_ptr, int **cpu_ptr){
+    auto size = findsize(filename) / sizeof(int);
+    cout << filename << "size: " << size << endl;   
+    //size = size / 2;
+    *cpu_ptr = (int*)malloc(sizeof(int) * size);
+    cudaMalloc((void **)gpu_ptr, sizeof(int) * size);
+
+    FILE* file = fopen(filename.c_str(), "rb");
     if (!file) {
         perror(("Error opening file " + filename).c_str());
         exit(1);
     }
 
-    fread(data, 1, size, file);
+    fread(*cpu_ptr, sizeof(int), size, file);
     fclose(file);
     
-    // Copy data from CPU to GPU
-    CUDA_TIMER_START(cpy);
-    cudaMemcpy(gpudata, data, size, cudaMemcpyHostToDevice);
-    CUDA_TIMER_STOP(cpy);
-
-    // Free memory
-    cudaFreeHost(data);
-
-}
-
-uint load_data(const string& filename, int **out_ptr){
-    auto size = findsize(filename) / sizeof(int);
-    cout << filename << "size: " << size << endl;   
-    //size = size / 2;
-    cudaMalloc((void **)out_ptr, sizeof(int) * size);
-    loadbin(filename, *out_ptr, sizeof(int) * size);
+    cudaMemcpy(*gpu_ptr, *cpu_ptr, sizeof(int) * size, cudaMemcpyHostToDevice);
     return size;
 }
 
@@ -122,3 +188,7 @@ uint Log2(uint num) {
 
     return result;
 }
+
+
+
+

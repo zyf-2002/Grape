@@ -18,23 +18,21 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O2 --extended-lambda -lineinfo")
 # Set Searching Path for Header Files
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-# Collecting source codes
-file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS
-	"${PROJECT_SOURCE_DIR}/src/*.c"
-	"${PROJECT_SOURCE_DIR}/src/*.cpp"
-	"${PROJECT_SOURCE_DIR}/src/*.cu"
-)
+file(GLOB_RECURSE CU_FILES "${PROJECT_SOURCE_DIR}/src/*.cu")
+file(GLOB_RECURSE CPP_FILES "${PROJECT_SOURCE_DIR}/src/*.cpp")
+add_library(zkLLM STATIC ${CPP_FILES} ${CU_FILES})
 
-# Add Core Library
-add_library(zkLLM STATIC ${SRC_FILES})
 
 set_target_properties(zkLLM PROPERTIES
 	CUDA_SEPARABLE_COMPILATION ON
 	POSITION_INDEPENDENT_CODE ON
 )
+target_link_libraries(zkLLM PUBLIC snark)
 
-target_include_directories(zkLLM PUBLIC 
-							${PROJECT_SOURCE_DIR}/include)
+target_include_directories(zkLLM PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/depends/libsnark
+)
 
 set(CURVE "ALT_BN128" CACHE STRING "Default curve: one of ALT_BN128, BN128, EDWARDS, MNT4, MNT6")
 add_definitions(-DCURVE_${CURVE})
@@ -55,6 +53,5 @@ foreach(test_src ${TEST_SOURCES})
     target_include_directories(${test_name} PRIVATE 
 		${PROJECT_SOURCE_DIR}/include
 		${PROJECT_SOURCE_DIR}/depends/libsnark
-		${PROJECT_SOURCE_DIR}/depends/cgbn
 	)
 endforeach()

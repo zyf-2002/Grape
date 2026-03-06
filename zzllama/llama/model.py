@@ -4,7 +4,8 @@
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
+import os
+import glob
 import numpy as np
 
 import fairscale.nn.model_parallel.initialize as fs_init
@@ -17,15 +18,32 @@ from fairscale.nn.model_parallel.layers import (
 )
 from torch import nn
 
-all_w_list = []
 
 SCALE = 1 << 16
+swiglu_scale = 1 << 20
+qk_scale = 1 << 22
 SCALE2 = 1 << 32
 layer_num = 0
 num_norm = 0
 import torch
 
+def clear_bin_files(directories):
+    for dir_path in directories:
+        # 确保目录存在
+        os.makedirs(dir_path, exist_ok=True)
+        
+        # 查找所有.bin文件
+        bin_files = glob.glob(os.path.join(dir_path, '*.bin'))
+        
+        # 删除文件
+        for file_path in bin_files:
+            try:
+                os.remove(file_path)
+                print(f"已删除: {file_path}")
+            except Exception as e:
+                print(f"删除失败 {file_path}: {e}")
 def save_int(t: torch.Tensor, path):
+    t = t.to(torch.int32)
     if path[-4:] != '.bin':
         raise ValueError('Path must end with .bin')
 
@@ -54,12 +72,87 @@ def cosine_similarity_torch(x, y):
     y = y.flatten().to(torch.float32)
     return torch.dot(x, y) / (torch.norm(x) * torch.norm(y) + 1e-8)
 
+def my_softmax(input, exp_lut, bit_shift=20, max_index_bits=20):
+    x_max = torch.max(input, dim=-1, keepdim=True)[0]
+    save_int(x_max, f'../data/Q/max-{layer_num // 4}.bin')
+    x_shifted = input - x_max
+    save_int(x_shifted, f'../data/Q/exp_input-{layer_num // 4}.bin')
+    print(f"x_shifted 最小值: {x_shifted.min().item()}")
+    offset = torch.tensor(2**bit_shift - 1, dtype=torch.int32, device=input.device)
+    indices = x_shifted + offset
+    # 定义最大有效索引
+    max_index = torch.tensor(2**max_index_bits - 1, dtype=torch.int32, device=input.device)
+    # 检查越界
+    assert torch.all(indices >= 0), f"发现负索引: {indices[indices < 0]}"
+    assert torch.all(indices <= max_index), f"发现超出最大范围的索引: {indices[indices > max_index]}"
+    # 安全截断
+    indices = torch.clamp(indices, 0, max_index)
+    
+    
+    x_exp = exp_lut[indices.long()]
+    save_int(x_exp, f'../data/Q/exp_output-{layer_num // 4}.bin')
+    
+    x_sum = torch.sum(x_exp, dim=-1, keepdim=True)
+    print(f"x_sum 最大值: {x_sum.max().item()}")
+    print(f"x_sum 最小值: {x_sum.min().item()}")
+    save_int(x_sum, f'../data/Q/exp_sum-{layer_num // 4}.bin')
+    
+    x_exp_64 = x_exp.to(torch.int64)
+    x_sum_64 = x_sum.to(torch.int64)
+
+    # 四舍五入的整数除法
+    output = (x_exp_64 * SCALE + x_sum_64 // 2) // x_sum_64
+    output = output.to(torch.int32)
+    save_int(output, f'../data/Q/softmax_output-{layer_num // 4}.bin')
+    
+    value = x_exp_64 * 2 * SCALE - x_sum_64 * (2*output - 1)
+    save_int(value, f'../data/Q/softmax_lookup_query-{layer_num // 4}.bin')
+    #value = x_sum_64 * (2*output + 1) - x_exp_64 * 2 * SCALE
+    
+    value = value.to(torch.int32)
+    print(f"value 最大值: {torch.max(value)}")
+    print(f"value 最小值: {torch.min(value)}")
+    return output
+
+def my_silu(input, silu_lut, bit_shift=18, max_index_bits=19):
+    """
+    使用查找表执行量化的SiLU（Swish）激活函数
+    Args:
+        q_temp_x1: 量化的输入张量 (int32)
+        silu_lut: SiLU查找表
+        bit_shift: 偏移位数，默认18（对应2^18的偏移）
+        max_index_bits: 最大索引位数，默认19（对应2^19-1的最大值）
+    
+    Returns:
+        量化后的SiLU输出张量
+    """
+   
+    # 添加偏移量转换为非负索引
+    offset = torch.tensor(2**bit_shift, dtype=torch.int32, device=input.device)
+    indices = input + offset
+    # 定义最大有效索引
+    max_index = torch.tensor(2**max_index_bits - 1, dtype=torch.int32, device=input.device)
+    # 检查越界
+    assert torch.all(indices >= 0), f"发现负索引: {indices[indices < 0]}"
+    assert torch.all(indices <= max_index), f"发现超出最大范围的索引: {indices[indices > max_index]}"
+    # 安全截断
+    indices = torch.clamp(indices, 0, max_index)
+    
+    # 查表执行SiLU
+    q_output = silu_lut[indices.long()]
+    
+    # 打印输出统计
+    print(f"输出最小值: {q_output.min().item()}")
+    print(f"输出最大值: {q_output.max().item()}")
+    
+    return q_output
+
 
 @dataclass
 class ModelArgs:
     dim: int = 4096
     n_layers: int = 32
-    n_heads: int = 32
+    n_heads: int = 1
     n_kv_heads: Optional[int] = None
     vocab_size: int = -1  # defined later by tokenizer
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
@@ -68,6 +161,13 @@ class ModelArgs:
 
     max_batch_size: int = 32
     max_seq_len: int = 2048
+    
+    def __post_init__(self):
+        # 强制设置为1，覆盖任何传入的值
+        self.n_heads = 1
+        # 确保 n_kv_heads 也合理
+        if self.n_kv_heads is not None:
+            self.n_kv_heads = 1
 
 
 class RMSNorm(torch.nn.Module):
@@ -99,7 +199,7 @@ class RMSNorm(torch.nn.Module):
             torch.Tensor: The normalized tensor.
 
         """
-        temp = (x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)).to(torch.float16)
+        temp = torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps).to(torch.float16)
         
         return temp
         
@@ -117,48 +217,43 @@ class RMSNorm(torch.nn.Module):
 
         """
         
-        tempx = (x.to(torch.float64) / SCALE).to(torch.float16)
+        tempx = (x.to(torch.float64) / SCALE).to(torch.float32)
         rms = self._norm(tempx.float()).type_as(tempx)
-
-        rms_int = torch.round(rms.to(torch.float64) * SCALE).to(torch.int32)
         
+        rms_int = torch.round(rms.to(torch.float64) * SCALE).to(torch.int32)
         # print("rms max abs:", rms.abs().max().item())
         # print("rms_weight max abs:", self.weight.abs().max().item())
         
-        
-        #量化
-        
         global num_norm
         w = torch.round(self.weight.to(torch.float64) * SCALE).to(torch.int32)
-        #print(w.shape)
         
-        if layer_num > 28:
-            if num_norm % 2 == 0:
-                save_int(w, f'../data/W/NormFirst_layer.bin')
-                all_w_list.append(w)
-            else:
-                save_int(w, f'../data/W/NormSecond_layer.bin')
         
+        rms_w = torch.matmul(rms_int.to(torch.float64), w.view(1, 4096).to(torch.float64)).to(torch.int64)
+        #rms_w = (rms_w + SCALE//2) // SCALE
+        q_rms_w = ((rms_w + SCALE//2) // SCALE).to(torch.int32)
+        r_rms_w = (rms_w - q_rms_w * SCALE).to(torch.int32)
+        
+        output = (q_rms_w.to(torch.int64)) * (x.to(torch.int64)) 
+        q_output = ((output + SCALE//2) // SCALE).to(torch.int32)
+        r_output = (output - q_output * SCALE).to(torch.int32)
+        
+        if num_norm % 2 == 0:
+            save_int(w, f'../data/W/NormFirst-{layer_num // 4}.bin')
+            save_int(rms_int, f'../data/Q/rmsFirst-{layer_num // 4}.bin')
+            save_int(q_rms_w, f'../data/Q/rmswFirst-{layer_num // 4}.bin')
+            save_int(r_rms_w, f'../data/R/rmswFirst-{layer_num // 4}.bin')
+            save_int(q_output, f'../data/Q/normOutFirst-{layer_num // 4}.bin')
+            save_int(r_output, f'../data/R/normOutFirst-{layer_num // 4}.bin')
+        else:
+            save_int(w, f'../data/W/NormSecond-{layer_num // 4}.bin')
+            save_int(rms_int, f'../data/Q/rmsSecond-{layer_num // 4}.bin')
+            save_int(q_rms_w, f'../data/Q/rmswSecond-{layer_num // 4}.bin')
+            save_int(r_rms_w, f'../data/R/rmswSecond-{layer_num // 4}.bin')
+            save_int(q_output, f'../data/Q/normOutSecond-{layer_num // 4}.bin')
+            save_int(r_output, f'../data/R/normOutSecond-{layer_num // 4}.bin')
         
         num_norm += 1
-
-        
-       # 乘法+反量化
-        output = ((rms_int.to(torch.int64)) * (w.to(torch.int64)) + SCALE//2) // SCALE
-        output = output.to(torch.int32)
-
-
-        
-        
-        #yuan =  rms * self.weight
-        
-        # similarity = cosine_similarity_torch(yuan, output)
-        # print(f"余弦相似度: {similarity:.6f}")
-        # diff = (yuan - output).to(torch.float32)   # 转成 float32
-        # print("Max absolute difference after rounding:", diff.abs().max().item())
-        
-        
-        return output
+        return q_output
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     """
@@ -352,7 +447,7 @@ class Attention(nn.Module):
         #         self.head_dim,
         #     )
         # ).cuda()
-
+        self.exp_lut = load_int('../data/table/exp-table.bin')
     def forward(
         self,
         x: torch.Tensor,
@@ -375,155 +470,123 @@ class Attention(nn.Module):
         """
         bsz, seqlen, _ = x.shape
         
-        WK_int = torch.round(((self.wk.weight).to(torch.float64)) * SCALE).to(torch.int32)
-        WQ_int = torch.round(((self.wq.weight).to(torch.float64)) * SCALE).to(torch.int32)
-        WV_int = torch.round(((self.wv.weight).to(torch.float64)) * SCALE).to(torch.int32)
-        WO_int = torch.round(((self.wo.weight).to(torch.float64)) * SCALE).to(torch.int32)
+        WK = torch.round(((self.wk.weight).to(torch.float64)) * SCALE).to(torch.int32)
+        WQ = torch.round(((self.wq.weight).to(torch.float64)) * SCALE).to(torch.int32)
+        WV = torch.round(((self.wv.weight).to(torch.float64)) * SCALE).to(torch.int32)
+        WO = torch.round(((self.wo.weight).to(torch.float64)) * SCALE).to(torch.int32)
         
-        if layer_num > 28:
-            save_int(WK_int, f'../data/W/Attention_K_layer.bin')
-            save_int(WQ_int, f'../data/W/Attention_Q_layer.bin')
-            save_int(WV_int, f'../data/W/Attention_V_layer.bin')  #保存权重到文件
-            save_int(WO_int, f'../data/W/Attention_O_layer.bin')
-       
-        x_int = x
-
-        # 提升到 int64 防止溢出
-        XQ_int = torch.matmul(x_int.to(torch.float64), WQ_int.t().to(torch.float64)).to(torch.int64)
-        XK_int = torch.matmul(x_int.to(torch.float64), WK_int.t().to(torch.float64)).to(torch.int64)
-        XV_int = torch.matmul(x_int.to(torch.float64), WV_int.t().to(torch.float64)).to(torch.int64)
         
-            
-        # 反量化
-        xq = (XQ_int + SCALE//2) // SCALE
-        xk = (XK_int + SCALE//2) // SCALE
-        xv = (XV_int + SCALE//2) // SCALE
+        save_int(WK, f'../data/W/K-{layer_num // 4}.bin')
+        save_int(WQ, f'../data/W/Q-{layer_num // 4}.bin')
+        save_int(WV, f'../data/W/V-{layer_num // 4}.bin')  #保存权重到文件
+        save_int(WO, f'../data/W/O-{layer_num // 4}.bin')
+        #save_int(x, f'../data/Q/atten_input-{layer_num // 4}.bin')
+        
+        XQ = torch.matmul(x.to(torch.float64), WQ.t().to(torch.float64)).to(torch.int64)
+        XK = torch.matmul(x.to(torch.float64), WK.t().to(torch.float64)).to(torch.int64)
+        XV = torch.matmul(x.to(torch.float64), WV.t().to(torch.float64)).to(torch.int64)
+        
+        q_XQ = ((XQ + SCALE//2) // SCALE).to(torch.int32)
+        r_XQ = (XQ - q_XQ * SCALE).to(torch.int32)
+        save_int(q_XQ, f'../data/Q/xq-{layer_num // 4}.bin')
+        save_int(r_XQ, f'../data/R/xq-{layer_num // 4}.bin')
+        
+        q_XK = ((XK + SCALE//2) // SCALE).to(torch.int32)
+        r_XK = (XK - q_XK * SCALE).to(torch.int32)
+        save_int(q_XK, f'../data/Q/xk-{layer_num // 4}.bin')
+        save_int(r_XK, f'../data/R/xk-{layer_num // 4}.bin')
+        
+        q_XV = ((XV + SCALE//2) // SCALE).to(torch.int32)
+        r_XV = (XV - q_XV * SCALE).to(torch.int32)
+        save_int(q_XV.transpose(-2, -1), f'../data/Q/xv-{layer_num // 4}.bin')
+        save_int(r_XV.transpose(-2, -1), f'../data/R/xv-{layer_num // 4}.bin')
+        # xq = (XQ_int + SCALE//2) // SCALE
+        # xk = (XK_int + SCALE//2) // SCALE
+        # xv = (XV_int + SCALE//2) // SCALE
        
         
         #xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
        
-        
-
-        xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-        xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-
-        xq = (xq.to(torch.float64) / SCALE).to(torch.float32)
-        xk = (xk.to(torch.float64) / SCALE).to(torch.float32)
-        
-        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
-        
-        xq = (xq.to(torch.float64) * SCALE).to(torch.int32)
-        xk = (xk.to(torch.float64) * SCALE).to(torch.int32)
-        
-        
-        self.cache_k = self.cache_k.to(xq)
-        self.cache_v = self.cache_v.to(xv)
-        
-
-        self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
-        self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
-        
-
-        keys = self.cache_k[:bsz, : start_pos + seqlen]
-        values = self.cache_v[:bsz, : start_pos + seqlen]
-
-        # repeat k/v heads if n_kv_heads < n_heads
-        keys = repeat_kv(keys, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-        values = repeat_kv(values, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-
-        xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        keys = keys.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
-        values = values.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
-        
-        scores = torch.matmul(xq.to(torch.float64), keys.transpose(2, 3).to(torch.float64)).to(torch.int64)
-        scores = (scores + SCALE//2) // SCALE
-        scores = (scores.to(torch.float64) / SCALE).to(torch.float32)
-        scores = scores / math.sqrt(self.head_dim)
-        
-        if mask is not None:
-            scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
-        scores = F.softmax(scores.float(), dim=-1).type_as(scores)
-        # scores =scores * ~mask1
-        
-        # if mask is not None:
-        #     scores = scores + mask
-        #     shift = scores
-        #     shift = (shift.to(torch.float64) / SCALE2).to(torch.float32)
-            
-        #     shift = (shift.to(torch.float64) / math.sqrt(self.head_dim)).to(torch.float32)
-        #     shift = math.sqrt(self.head_dim) * torch.log((torch.exp(shift)).sum(axis = -1, keepdim = True))
-        #     shift = (shift.to(torch.float64) * SCALE2).to(torch.int64)
-        #     scores -= shift
-        #     scores = (scores.to(torch.float64) / (SCALE2 * math.sqrt(self.head_dim))).to(torch.float32)
-            
-        #     scores = (torch.exp(scores).float()) 
-        # else:
-        #     scores = (scores.to(torch.float64) / SCALE2).to(torch.float32)
-        #     scores = scores / math.sqrt(self.head_dim)
-        #     scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-
-            
-        scores = (scores.to(torch.float64) * SCALE).to(torch.int32)
-        
-        #print("rms max abs:", scores.to(torch.float64).abs().max().item())
-        
-        
-        
-        output = torch.matmul(scores.to(torch.float64), values.to(torch.float64)).to(torch.int64)  # (bs, n_local_heads, seqlen, head_dim)
-        
-        output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-        
-        
-        output = (output + SCALE//2) // SCALE
-        
-        
-        
-        wout = torch.matmul(output.to(torch.float64), WO_int.t().to(torch.float64)).to(torch.int64)
-        wout = (wout + SCALE//2) // SCALE
-        
-        
-        
-        
-        
-        # #--------------------------------------------------------------------------------------------------------------------------
-        # bsz, seqlen, _ = x.shape
-        # xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-
         # xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         # xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         # xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
 
-        # xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+        # xq = (xq.to(torch.float64) / SCALE).to(torch.float32)
+        # xk = (xk.to(torch.float64) / SCALE).to(torch.float32)
         
-        # self.cache_k_float[:bsz, start_pos : start_pos + seqlen] = xk
-        # self.cache_v_float[:bsz, start_pos : start_pos + seqlen] = xv
+        #xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+        
+        # xq = (xq.to(torch.float64) * SCALE).to(torch.int32)
+        # xk = (xk.to(torch.float64) * SCALE).to(torch.int32)
+        
+        # self.cache_k = self.cache_k.to(xq)
+        # self.cache_v = self.cache_v.to(xv)
+        
 
-        # keys = self.cache_k_float[:bsz, : start_pos + seqlen]
-        # values = self.cache_v_float[:bsz, : start_pos + seqlen]
+        # self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
+        # self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
+        
+        keys = q_XK
+        values = q_XV
 
-        # # repeat k/v heads if n_kv_heads < n_heads
-        # keys = repeat_kv(keys, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-        # values = repeat_kv(values, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
+        # repeat k/v heads if n_kv_heads < n_heads
+        #keys = repeat_kv(keys, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
+        #print(self.n_rep)
+        #values = repeat_kv(values, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
 
         # xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         # keys = keys.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
         # values = values.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
-        # scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
+        
+        scores = torch.matmul(q_XQ.to(torch.float64), keys.transpose(-2, -1).to(torch.float64)).to(torch.int64)
+        q_scores = ((scores + qk_scale//2) // qk_scale).to(torch.int32)
+        r_scores = (scores - q_scores * qk_scale).to(torch.int32)
+        save_int(q_scores, f'../data/Q/scores-{layer_num // 4}.bin')
+        save_int(r_scores, f'../data/R/scores-{layer_num // 4}.bin')
+        
+        # scores = scores / math.sqrt(self.head_dim)
+        print(f"head_dim: {self.head_dim}")
+
         # if mask is not None:
         #     scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
-        # scores = F.softmax(scores.float(), dim=-1).type_as(xv)
-        # output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
-        # output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-       
-        # nwout = self.wo(output)
         
-        # similarity = cosine_similarity_torch(nwout, wout)
-        # print(f"余弦相似度: {similarity:.6f}")
-        # diff = (nwout - wout).to(torch.float32)   # 转成 float32
-        # print("Max absolute difference after rounding:", diff.abs().max().item())
-        #-------------------------------------------------------------------------------------------------------------------------------------
-        return wout
+        
+        scores = my_softmax(q_scores, self.exp_lut, 20, 20).to(torch.int32)
+        
+        real_probs = scores.float() / 65536.0
+        # 验证每行和
+        row_sums = torch.sum(real_probs, dim=-1)
+        print("=== 归一化验证 ===")
+        print(f"每行和 - 最小值: {row_sums.min().item():.6f}")
+        print(f"每行和 - 最大值: {row_sums.max().item():.6f}")
+        print(f"每行和 - 均值: {row_sums.mean().item():.6f}")
+        print(f"每行和 - 标准差: {row_sums.std().item():.6f}")
+        # 检查是否接近1
+        tolerance = 1e-3
+        within_tolerance = torch.abs(row_sums - 1.0) < tolerance
+        print(f"\n在 {tolerance} 误差内: {within_tolerance.float().mean()*100:.2f}%")
+        print(f"结果最小值: {scores.min().item()}")
+        print(f"结果最大值: {scores.max().item()}")
+        
+        #scores = F.softmax(scores.float(), dim=-1).type_as(scores)
+        # scores =scores * ~mask1
+        
+       
+        qkv = torch.matmul(scores.to(torch.float64), values.to(torch.float64)).to(torch.int64)  # (bs, n_local_heads, seqlen, head_dim)
+        q_qkv = ((qkv + SCALE//2) // SCALE).to(torch.int32)
+        r_qkv = (qkv - q_qkv * SCALE).to(torch.int32)
+        save_int(q_qkv, f'../data/Q/qkv-{layer_num // 4}.bin')
+        save_int(r_qkv, f'../data/R/qkv-{layer_num // 4}.bin')
+        #output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
+        
+        wout = torch.matmul(q_qkv.to(torch.float64), WO.t().to(torch.float64)).to(torch.int64)
+
+        q_wout = ((wout + SCALE//2) // SCALE).to(torch.int32)
+        r_wout = (wout - q_wout * SCALE).to(torch.int32)
+        save_int(q_wout, f'../data/Q/atten_out-{layer_num // 4}.bin')
+        save_int(r_wout, f'../data/R/atten_out-{layer_num // 4}.bin')
+        
+        return q_wout
 
 
 class FeedForward(nn.Module):
@@ -565,7 +628,8 @@ class FeedForward(nn.Module):
         self.w3 = ColumnParallelLinear(
             dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
         )
-
+        
+        self.silu_lut = load_int('../data/table/swiglu-table.bin')
     def forward(self, x):
         x_int = x
         x_int.to(torch.int32)
@@ -573,21 +637,14 @@ class FeedForward(nn.Module):
         w2_int = torch.round(((self.w2.weight).to(torch.float64)) * SCALE).to(torch.int32)
         w3_int = torch.round(((self.w3.weight).to(torch.float64)) * SCALE).to(torch.int32)
         
-        if layer_num > 28:
-            # max_x  = torch.abs(x_int).max().item()
-            # max_w1 = torch.abs(w1_int).max().item()
-            # max_w2 = torch.abs(w2_int).max().item()
-            # max_w3 = torch.abs(w3_int).max().item()
+        
+        # max_x  = torch.abs(x_int).max().item()
+           
 
-            # print(f"max |X|   = {max_x}")
-            # print(f"max |W1|  = {max_w1}")
-            # print(f"max |W2|  = {max_w2}")
-            # print(f"max |W3|  = {max_w3}")
-
-            save_int(w1_int, f'../data/W/gate_layer.bin')
-            save_int(w2_int, f'../data/W/down_layer.bin')
-            save_int(w3_int, f'../data/W/up_layer.bin')
-            save_int(x_int, f'../data/X.bin')
+        save_int(w1_int, f'../data/W/gate-{layer_num // 4}.bin')
+        save_int(w2_int, f'../data/W/down-{layer_num // 4}.bin')
+        save_int(w3_int, f'../data/W/up-{layer_num // 4}.bin')
+        save_int(x_int, f'../data/Q/ffn_input-{layer_num // 4}.bin')
         
         
         temp_x1 = torch.matmul(x_int.to(torch.float64), w1_int.t().to(torch.float64)).to(torch.int64)
@@ -599,34 +656,38 @@ class FeedForward(nn.Module):
         q_temp_x3 = ((temp_x3 + SCALE//2) // SCALE).to(torch.int32)
         rem_temp_x3 = (temp_x3 - q_temp_x3 * SCALE).to(torch.int32)
         
+        q_temp_x1 = ((temp_x1 + swiglu_scale//2) // swiglu_scale).to(torch.int32)
+        rem_temp_x1 = (temp_x1 - q_temp_x1 * swiglu_scale).to(torch.int32)
+        
     
-        # print(q_temp_x3.shape)
-        if layer_num > 28:
-            save_int(q_temp_x3, f'../data/X_up.bin')
-            save_int(rem_temp_x3, f'../data/X_up_rem.bin')
+      
+        save_int(q_temp_x3, f'../data/Q/up_out-{layer_num // 4}.bin')
+        save_int(rem_temp_x3, f'../data/R/up_out-{layer_num // 4}.bin')
+        
+        save_int(q_temp_x1, f'../data/Q/gate_out-{layer_num // 4}.bin')
+        save_int(rem_temp_x1, f'../data/R/gate_out-{layer_num // 4}.bin')
             
+        #q_temp_x1 = F.silu(q_temp_x1)
         
-        temp_x1 = (temp_x1 + SCALE//2) // SCALE
+        q_temp_x1 = my_silu(q_temp_x1, self.silu_lut, 18, 19)
+        
 
-        temp_x1 = (temp_x1.to(torch.float64) / SCALE).to(torch.float16)
-        #print("rms max abs:", temp_x1.to(torch.float16).abs().max().item())
-        temp_x1 = F.silu(temp_x1)
-        temp_x1 = torch.round((temp_x1.to(torch.float64)) * SCALE).to(torch.int32)
-        temp_x13 = ((temp_x1.to(torch.int64)) * (q_temp_x3.to(torch.int64)) + SCALE//2) // SCALE
-        temp_x13 = temp_x13.to(torch.int32)
-        #print(temp_x13.shape)
+        save_int(q_temp_x1, f'../data/Q/silu_out-{layer_num // 4}.bin')
         
-        if layer_num > 28:
-            save_int(temp_x13, f'../data/X1.bin')
-        temp_x123 = torch.matmul(temp_x13.to(torch.float64), w2_int.t().to(torch.float64)).to(torch.int64)
+        temp_x13 = (q_temp_x1.to(torch.int64)) * (q_temp_x3.to(torch.int64)).to(torch.int64)
+        q_temp_x13 = ((temp_x13 + SCALE//2) // SCALE).to(torch.int32)
+        rem_temp_x13 = (temp_x13 - q_temp_x13 * SCALE).to(torch.int32)
+        
+        save_int(q_temp_x13, f'../data/Q/upSilu-{layer_num // 4}.bin')
+        save_int(rem_temp_x13, f'../data/R/upSilu-{layer_num // 4}.bin')
+
+        temp_x123 = torch.matmul(q_temp_x13.to(torch.float64), w2_int.t().to(torch.float64)).to(torch.int64)
         
         q_temp_x123 = ((temp_x123 + SCALE//2) // SCALE).to(torch.int32)
         rem_temp_x123 = (temp_x123 - q_temp_x123 * SCALE).to(torch.int32)
-        
-        #temp_x123 = (temp_x123 + SCALE//2) // SCALE
-        if layer_num > 28:
-            save_int(q_temp_x123, f'../data/X_down.bin')
-            save_int(rem_temp_x123, f'../data/X_down_rem.bin')
+    
+        save_int(q_temp_x123, f'../data/Q/down_out-{layer_num // 4}.bin')
+        save_int(rem_temp_x123, f'../data/R/down_out-{layer_num // 4}.bin')
         
         out = q_temp_x123.to(torch.int32)
         
@@ -697,15 +758,19 @@ class TransformerBlock(nn.Module):
 
         """
         global layer_num
-        layer_num += 1
+        
+        save_int(x, f'../data/Q/input-{layer_num // 4}.bin')
         h = x + self.attention(
             self.attention_norm(x), start_pos, freqs_cis, mask
         )
         
-
+        save_int(h, f'../data/Q/skip-{layer_num // 4}.bin')
         h = h.to(torch.int32)
         
         out = h + self.feed_forward(self.ffn_norm(h))
+        save_int(out, f'../data/Q/output-{layer_num // 4}.bin')
+        
+        layer_num += 1
         
         return out
 
@@ -766,27 +831,14 @@ class Transformer(nn.Module):
             torch.Tensor: Output logits after applying the Transformer model.
 
         """
-        files_to_clear = [
-            "../data/W/NormFirst_layer.bin",
-            "../data/W/NormSecond_layer.bin",
-            "../data/W/gate_layer.bin",
-            "../data/W/down_layer.bin",
-            "../data/W/up_layer.bin",
-            "../data/W/Attention_V_layer.bin",
-            "../data/W/Attention_Q_layer.bin",
-            "../data/W/Attention_K_layer.bin",
-            "../data/W/Attention_O_layer.bin",
-        ]
-        # 遍历每个文件，用 wb 模式打开就会清空文件内容
-        for path in files_to_clear:
-            # 如果文件不存在也没关系，会创建空文件
-            with open(path, 'wb') as f:
-                pass
-
-
+        data_dirs = ['../data/Q/', '../data/W/', '../data/R/']
+        clear_bin_files(data_dirs)
+        
         _bsz, seqlen = tokens.shape
         
-        h = self.tok_embeddings(tokens)
+        # h = self.tok_embeddings(tokens)
+        embed_dim = 4096  
+        h = torch.randn(1, seqlen, embed_dim, device=0)
         print("---------------------------------------------------------------------------")
         #print(h.shape)
         h_temp = h
@@ -819,11 +871,7 @@ class Transformer(nn.Module):
             print(f"------------------------------------------------------正在执行第 {i} 层-----------------")  # 这里 i 从 0 开始
             h = layer(h, start_pos, freqs_cis, mask)
             
-        # all_w = torch.stack(all_w_list, dim=0)
-        # print(all_w.shape)
-        # data = load_int("../data/W/NormFirst_layer.bin").view_as(all_w)
-        # print(torch.equal(all_w, data)) 
-            
+       
         h = self.norm(h)
         # h = (h.to(torch.float64) / SCALE).to(torch.float16)
         # output = self.output(h).float()

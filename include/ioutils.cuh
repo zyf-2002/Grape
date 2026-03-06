@@ -4,6 +4,9 @@
 #include <random>
 #include <limits>
 #include <vector>
+#include <chrono> 
+#include <omp.h>
+
 
 using namespace std;
 
@@ -46,14 +49,21 @@ using namespace std;
     } while (0)
 
 
-void savebin(const string& filename, const void* gpudata, uint size);
+void savebin(const string& filename, const void* data, uint size, bool is_gpu_data = true);
 
 ulong findsize(const string& filename);
 
-void loadbin(const string& filename, void* gpudata, ulong size);
+void loadbin(const string& filename, void* data, ulong size, bool is_gpu_data = true);
 
 uint Log2(uint num);
 
-uint load_data(const string& filename, int **out_ptr);
+uint load_data(const string& filename, int **gpu_ptr);
+uint load_data(const string& filename, int **gpu_ptr, int **cpu_ptr);
 
 void generate_data(int **out_ptr, uint size);
+
+
+
+
+
+

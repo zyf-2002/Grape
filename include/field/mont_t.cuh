@@ -208,7 +208,7 @@ public:
             even[i] = p[i];
     }
 
-    inline void set_uint(uint32_t p) {
+    inline void set_uint(uint32_t &p) {
         for (size_t i = 1; i < n; i++) even[i] = 0;
         even[0] = p;
     }

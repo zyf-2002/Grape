@@ -9,47 +9,54 @@
 using namespace std;
 using namespace libsnark;
 
-const size_t N = 11008;   // number of points /row_size / 
+const size_t N = 11008;   
 const size_t W = 1 << 8;  //pre_windows
 const size_t layer_num = 4;
+uint npoints = 11008;
 
 
 int main(int argc, char *argv[])
 {
+    if (argc < 2) {
+        return 1;
+    }
+    uint layer_num = atoi(argv[1]);
+    cout << "layer_num: " << layer_num << endl;
     
     ppT::init_public_params();
     affine_t *points;
-    cudaMalloc((void **)&points, sizeof(affine_t) * N * W);
-    auto cpu_points = precompute_generators(N, W, points);
+    cudaMalloc((void **)&points, sizeof(affine_t) * npoints * W);
+    auto cpu_points = precompute_generators(npoints, W, points);
     CUDA_DEBUG;
 
     cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
 
-    int *tensor;
-    string filename = "../data/X_up.bin";
+    int *tensor = nullptr;
+    string filename = "../data/R/up_out-7.bin";
     CPU_TIMER_START(load_data);
-    //uint size = load_data(filename, &tensor);
+    uint size = load_data(filename, &tensor);
 
-    auto size = findsize(filename) / sizeof(int);
-    generate_data(&tensor, size);
+    //auto size = findsize(filename) / sizeof(int);
+    //generate_data(&tensor, size);
+    size = size / (4 / layer_num);
     CUDA_DEBUG;
     CPU_TIMER_STOP(load_data);
 
     cout<<"----------------------------------"<<"load_data done"<< "----------------------------------"<<endl;
 
-    Hyrax hyrax(size, N, points, cpu_points[0]);
+    Hyrax hyrax(npoints, points, cpu_points[0]);
 
     FrTensor fr_tensor(size, tensor);
     //fr_tensor.inverse();
     CUDA_DEBUG;
 
     CPU_TIMER_START(commit);
-    jacob_t *commitment = hyrax.commit(tensor);
+    jacob_t *commitment = hyrax.commit(tensor, size, N);
     CUDA_DEBUG;
     CPU_TIMER_STOP(commit);
 
     CPU_TIMER_START(commit_fr);
-    jacob_t *commitment1 = hyrax.commit(fr_tensor);
+    jacob_t *commitment1 = hyrax.commit(fr_tensor, size, N);
     CUDA_DEBUG;
     CPU_TIMER_STOP(commit_fr);
 
@@ -67,7 +74,7 @@ int main(int argc, char *argv[])
     
     Fr c = Fr::random_element();
     CPU_TIMER_START(open);
-    auto proof = hyrax.open(tensor, eval_point, c);
+    auto proof = hyrax.open(fr_tensor, eval_point, c, size, N, layer_num);
     CUDA_DEBUG;
     CPU_TIMER_STOP(open);
 
