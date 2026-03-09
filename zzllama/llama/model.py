@@ -25,6 +25,7 @@ qk_scale = 1 << 22
 SCALE2 = 1 << 32
 layer_num = 0
 num_norm = 0
+sl = 4
 import torch
 
 def clear_bin_files(directories):
@@ -74,9 +75,9 @@ def cosine_similarity_torch(x, y):
 
 def my_softmax(input, exp_lut, bit_shift=20, max_index_bits=20):
     x_max = torch.max(input, dim=-1, keepdim=True)[0]
-    save_int(x_max, f'../data/Q/max-{layer_num // 4}.bin')
+    save_int(x_max, f'../data/Q/max-{layer_num // sl}.bin')
     x_shifted = input - x_max
-    save_int(x_shifted, f'../data/Q/exp_input-{layer_num // 4}.bin')
+    save_int(x_shifted, f'../data/Q/exp_input-{layer_num // sl}.bin')
     print(f"x_shifted 最小值: {x_shifted.min().item()}")
     offset = torch.tensor(2**bit_shift - 1, dtype=torch.int32, device=input.device)
     indices = x_shifted + offset
@@ -90,12 +91,12 @@ def my_softmax(input, exp_lut, bit_shift=20, max_index_bits=20):
     
     
     x_exp = exp_lut[indices.long()]
-    save_int(x_exp, f'../data/Q/exp_output-{layer_num // 4}.bin')
+    save_int(x_exp, f'../data/Q/exp_output-{layer_num // sl}.bin')
     
     x_sum = torch.sum(x_exp, dim=-1, keepdim=True)
     print(f"x_sum 最大值: {x_sum.max().item()}")
     print(f"x_sum 最小值: {x_sum.min().item()}")
-    save_int(x_sum, f'../data/Q/exp_sum-{layer_num // 4}.bin')
+    save_int(x_sum, f'../data/Q/exp_sum-{layer_num // sl}.bin')
     
     x_exp_64 = x_exp.to(torch.int64)
     x_sum_64 = x_sum.to(torch.int64)
@@ -103,10 +104,10 @@ def my_softmax(input, exp_lut, bit_shift=20, max_index_bits=20):
     # 四舍五入的整数除法
     output = (x_exp_64 * SCALE + x_sum_64 // 2) // x_sum_64
     output = output.to(torch.int32)
-    save_int(output, f'../data/Q/softmax_output-{layer_num // 4}.bin')
+    save_int(output, f'../data/Q/softmax_output-{layer_num // sl}.bin')
     
     value = x_exp_64 * 2 * SCALE - x_sum_64 * (2*output - 1)
-    save_int(value, f'../data/Q/softmax_lookup_query-{layer_num // 4}.bin')
+    save_int(value, f'../data/Q/softmax_lookup_query-{layer_num // sl}.bin')
     #value = x_sum_64 * (2*output + 1) - x_exp_64 * 2 * SCALE
     
     value = value.to(torch.int32)
@@ -238,19 +239,19 @@ class RMSNorm(torch.nn.Module):
         r_output = (output - q_output * SCALE).to(torch.int32)
         
         if num_norm % 2 == 0:
-            save_int(w, f'../data/W/NormFirst-{layer_num // 4}.bin')
-            save_int(rms_int, f'../data/Q/rmsFirst-{layer_num // 4}.bin')
-            save_int(q_rms_w, f'../data/Q/rmswFirst-{layer_num // 4}.bin')
-            save_int(r_rms_w, f'../data/R/rmswFirst-{layer_num // 4}.bin')
-            save_int(q_output, f'../data/Q/normOutFirst-{layer_num // 4}.bin')
-            save_int(r_output, f'../data/R/normOutFirst-{layer_num // 4}.bin')
+            save_int(w, f'../data/W/NormFirst-{layer_num // sl}.bin')
+            save_int(rms_int, f'../data/Q/rmsFirst-{layer_num // sl}.bin')
+            save_int(q_rms_w, f'../data/Q/rmswFirst-{layer_num // sl}.bin')
+            save_int(r_rms_w, f'../data/R/rmswFirst-{layer_num // sl}.bin')
+            save_int(q_output, f'../data/Q/normOutFirst-{layer_num // sl}.bin')
+            save_int(r_output, f'../data/R/normOutFirst-{layer_num // sl}.bin')
         else:
-            save_int(w, f'../data/W/NormSecond-{layer_num // 4}.bin')
-            save_int(rms_int, f'../data/Q/rmsSecond-{layer_num // 4}.bin')
-            save_int(q_rms_w, f'../data/Q/rmswSecond-{layer_num // 4}.bin')
-            save_int(r_rms_w, f'../data/R/rmswSecond-{layer_num // 4}.bin')
-            save_int(q_output, f'../data/Q/normOutSecond-{layer_num // 4}.bin')
-            save_int(r_output, f'../data/R/normOutSecond-{layer_num // 4}.bin')
+            save_int(w, f'../data/W/NormSecond-{layer_num // sl}.bin')
+            save_int(rms_int, f'../data/Q/rmsSecond-{layer_num // sl}.bin')
+            save_int(q_rms_w, f'../data/Q/rmswSecond-{layer_num // sl}.bin')
+            save_int(r_rms_w, f'../data/R/rmswSecond-{layer_num // sl}.bin')
+            save_int(q_output, f'../data/Q/normOutSecond-{layer_num // sl}.bin')
+            save_int(r_output, f'../data/R/normOutSecond-{layer_num // sl}.bin')
         
         num_norm += 1
         return q_output
@@ -476,11 +477,11 @@ class Attention(nn.Module):
         WO = torch.round(((self.wo.weight).to(torch.float64)) * SCALE).to(torch.int32)
         
         
-        save_int(WK, f'../data/W/K-{layer_num // 4}.bin')
-        save_int(WQ, f'../data/W/Q-{layer_num // 4}.bin')
-        save_int(WV, f'../data/W/V-{layer_num // 4}.bin')  #保存权重到文件
-        save_int(WO, f'../data/W/O-{layer_num // 4}.bin')
-        #save_int(x, f'../data/Q/atten_input-{layer_num // 4}.bin')
+        save_int(WK, f'../data/W/K-{layer_num // sl}.bin')
+        save_int(WQ, f'../data/W/Q-{layer_num // sl}.bin')
+        save_int(WV, f'../data/W/V-{layer_num // sl}.bin')  #保存权重到文件
+        save_int(WO, f'../data/W/O-{layer_num // sl}.bin')
+        #save_int(x, f'../data/Q/atten_input-{layer_num // sl}.bin')
         
         XQ = torch.matmul(x.to(torch.float64), WQ.t().to(torch.float64)).to(torch.int64)
         XK = torch.matmul(x.to(torch.float64), WK.t().to(torch.float64)).to(torch.int64)
@@ -488,18 +489,18 @@ class Attention(nn.Module):
         
         q_XQ = ((XQ + SCALE//2) // SCALE).to(torch.int32)
         r_XQ = (XQ - q_XQ * SCALE).to(torch.int32)
-        save_int(q_XQ, f'../data/Q/xq-{layer_num // 4}.bin')
-        save_int(r_XQ, f'../data/R/xq-{layer_num // 4}.bin')
+        save_int(q_XQ, f'../data/Q/xq-{layer_num // sl}.bin')
+        save_int(r_XQ, f'../data/R/xq-{layer_num // sl}.bin')
         
         q_XK = ((XK + SCALE//2) // SCALE).to(torch.int32)
         r_XK = (XK - q_XK * SCALE).to(torch.int32)
-        save_int(q_XK, f'../data/Q/xk-{layer_num // 4}.bin')
-        save_int(r_XK, f'../data/R/xk-{layer_num // 4}.bin')
+        save_int(q_XK, f'../data/Q/xk-{layer_num // sl}.bin')
+        save_int(r_XK, f'../data/R/xk-{layer_num // sl}.bin')
         
         q_XV = ((XV + SCALE//2) // SCALE).to(torch.int32)
         r_XV = (XV - q_XV * SCALE).to(torch.int32)
-        save_int(q_XV.transpose(-2, -1), f'../data/Q/xv-{layer_num // 4}.bin')
-        save_int(r_XV.transpose(-2, -1), f'../data/R/xv-{layer_num // 4}.bin')
+        save_int(q_XV.transpose(-2, -1), f'../data/Q/xv-{layer_num // sl}.bin')
+        save_int(r_XV.transpose(-2, -1), f'../data/R/xv-{layer_num // sl}.bin')
         # xq = (XQ_int + SCALE//2) // SCALE
         # xk = (XK_int + SCALE//2) // SCALE
         # xv = (XV_int + SCALE//2) // SCALE
@@ -541,8 +542,8 @@ class Attention(nn.Module):
         scores = torch.matmul(q_XQ.to(torch.float64), keys.transpose(-2, -1).to(torch.float64)).to(torch.int64)
         q_scores = ((scores + qk_scale//2) // qk_scale).to(torch.int32)
         r_scores = (scores - q_scores * qk_scale).to(torch.int32)
-        save_int(q_scores, f'../data/Q/scores-{layer_num // 4}.bin')
-        save_int(r_scores, f'../data/R/scores-{layer_num // 4}.bin')
+        save_int(q_scores, f'../data/Q/scores-{layer_num // sl}.bin')
+        save_int(r_scores, f'../data/R/scores-{layer_num // sl}.bin')
         
         # scores = scores / math.sqrt(self.head_dim)
         print(f"head_dim: {self.head_dim}")
@@ -575,16 +576,16 @@ class Attention(nn.Module):
         qkv = torch.matmul(scores.to(torch.float64), values.to(torch.float64)).to(torch.int64)  # (bs, n_local_heads, seqlen, head_dim)
         q_qkv = ((qkv + SCALE//2) // SCALE).to(torch.int32)
         r_qkv = (qkv - q_qkv * SCALE).to(torch.int32)
-        save_int(q_qkv, f'../data/Q/qkv-{layer_num // 4}.bin')
-        save_int(r_qkv, f'../data/R/qkv-{layer_num // 4}.bin')
+        save_int(q_qkv, f'../data/Q/qkv-{layer_num // sl}.bin')
+        save_int(r_qkv, f'../data/R/qkv-{layer_num // sl}.bin')
         #output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
         
         wout = torch.matmul(q_qkv.to(torch.float64), WO.t().to(torch.float64)).to(torch.int64)
 
         q_wout = ((wout + SCALE//2) // SCALE).to(torch.int32)
         r_wout = (wout - q_wout * SCALE).to(torch.int32)
-        save_int(q_wout, f'../data/Q/atten_out-{layer_num // 4}.bin')
-        save_int(r_wout, f'../data/R/atten_out-{layer_num // 4}.bin')
+        save_int(q_wout, f'../data/Q/atten_out-{layer_num // sl}.bin')
+        save_int(r_wout, f'../data/R/atten_out-{layer_num // sl}.bin')
         
         return q_wout
 
@@ -641,10 +642,10 @@ class FeedForward(nn.Module):
         # max_x  = torch.abs(x_int).max().item()
            
 
-        save_int(w1_int, f'../data/W/gate-{layer_num // 4}.bin')
-        save_int(w2_int, f'../data/W/down-{layer_num // 4}.bin')
-        save_int(w3_int, f'../data/W/up-{layer_num // 4}.bin')
-        save_int(x_int, f'../data/Q/ffn_input-{layer_num // 4}.bin')
+        save_int(w1_int, f'../data/W/gate-{layer_num // sl}.bin')
+        save_int(w2_int, f'../data/W/down-{layer_num // sl}.bin')
+        save_int(w3_int, f'../data/W/up-{layer_num // sl}.bin')
+        save_int(x_int, f'../data/Q/ffn_input-{layer_num // sl}.bin')
         
         
         temp_x1 = torch.matmul(x_int.to(torch.float64), w1_int.t().to(torch.float64)).to(torch.int64)
@@ -661,33 +662,33 @@ class FeedForward(nn.Module):
         
     
       
-        save_int(q_temp_x3, f'../data/Q/up_out-{layer_num // 4}.bin')
-        save_int(rem_temp_x3, f'../data/R/up_out-{layer_num // 4}.bin')
+        save_int(q_temp_x3, f'../data/Q/up_out-{layer_num // sl}.bin')
+        save_int(rem_temp_x3, f'../data/R/up_out-{layer_num // sl}.bin')
         
-        save_int(q_temp_x1, f'../data/Q/gate_out-{layer_num // 4}.bin')
-        save_int(rem_temp_x1, f'../data/R/gate_out-{layer_num // 4}.bin')
+        save_int(q_temp_x1, f'../data/Q/gate_out-{layer_num // sl}.bin')
+        save_int(rem_temp_x1, f'../data/R/gate_out-{layer_num // sl}.bin')
             
         #q_temp_x1 = F.silu(q_temp_x1)
         
         q_temp_x1 = my_silu(q_temp_x1, self.silu_lut, 18, 19)
         
 
-        save_int(q_temp_x1, f'../data/Q/silu_out-{layer_num // 4}.bin')
+        save_int(q_temp_x1, f'../data/Q/silu_out-{layer_num // sl}.bin')
         
         temp_x13 = (q_temp_x1.to(torch.int64)) * (q_temp_x3.to(torch.int64)).to(torch.int64)
         q_temp_x13 = ((temp_x13 + SCALE//2) // SCALE).to(torch.int32)
         rem_temp_x13 = (temp_x13 - q_temp_x13 * SCALE).to(torch.int32)
         
-        save_int(q_temp_x13, f'../data/Q/upSilu-{layer_num // 4}.bin')
-        save_int(rem_temp_x13, f'../data/R/upSilu-{layer_num // 4}.bin')
+        save_int(q_temp_x13, f'../data/Q/upSilu-{layer_num // sl}.bin')
+        save_int(rem_temp_x13, f'../data/R/upSilu-{layer_num // sl}.bin')
 
         temp_x123 = torch.matmul(q_temp_x13.to(torch.float64), w2_int.t().to(torch.float64)).to(torch.int64)
         
         q_temp_x123 = ((temp_x123 + SCALE//2) // SCALE).to(torch.int32)
         rem_temp_x123 = (temp_x123 - q_temp_x123 * SCALE).to(torch.int32)
     
-        save_int(q_temp_x123, f'../data/Q/down_out-{layer_num // 4}.bin')
-        save_int(rem_temp_x123, f'../data/R/down_out-{layer_num // 4}.bin')
+        save_int(q_temp_x123, f'../data/Q/down_out-{layer_num // sl}.bin')
+        save_int(rem_temp_x123, f'../data/R/down_out-{layer_num // sl}.bin')
         
         out = q_temp_x123.to(torch.int32)
         
@@ -759,16 +760,16 @@ class TransformerBlock(nn.Module):
         """
         global layer_num
         
-        save_int(x, f'../data/Q/input-{layer_num // 4}.bin')
+        save_int(x, f'../data/Q/input-{layer_num // sl}.bin')
         h = x + self.attention(
             self.attention_norm(x), start_pos, freqs_cis, mask
         )
         
-        save_int(h, f'../data/Q/skip-{layer_num // 4}.bin')
+        save_int(h, f'../data/Q/skip-{layer_num // sl}.bin')
         h = h.to(torch.int32)
         
         out = h + self.feed_forward(self.ffn_norm(h))
-        save_int(out, f'../data/Q/output-{layer_num // 4}.bin')
+        save_int(out, f'../data/Q/output-{layer_num // sl}.bin')
         
         layer_num += 1
         

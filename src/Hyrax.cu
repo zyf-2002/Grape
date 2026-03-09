@@ -178,7 +178,9 @@ void single_commit(fr_t *d, affine_t *g, jacob_t *com, uint N, uint npoints)    
     jacob_t *tmp_out;
     cudaMalloc(&tmp_out, sizeof(jacob_t) * 32 * 32);
     single_windows_sum<<<32, 32>>>(d, g, tmp_out, N, npoints);
+    cudaDeviceSynchronize();
     single_windows_reduce<<<1, 32>>>(tmp_out, com, 32);
+    cudaDeviceSynchronize();
     cudaFree(tmp_out);
 }
 
@@ -223,8 +225,8 @@ Hyrax_proof& Hyrax_proof::operator=(const Hyrax_proof& other) {
         return *this;
     }
 
-Hyrax::Hyrax(uint npoints_, affine_t *g, bn128 &G_)
-    : npoints(npoints_), g_affine(g), G(G_)
+Hyrax::Hyrax(uint layer_num_, uint npoints_, affine_t *g, bn128 &G_)
+    : layer_num(layer_num_), npoints(npoints_ * layer_num_), g_affine(g), G(G_)
 {
 }
 
@@ -232,8 +234,13 @@ Hyrax::~Hyrax()
 {
 }
 
-Hyrax_proof Hyrax::open(FrTensor &tensor, const vector<Fr> eval_point_, Fr c, uint size, uint N, uint layer)
+Hyrax_proof Hyrax::open(FrTensor &tensor, const vector<Fr> eval_point_, Fr c, uint size, uint N)
 {
+    if(size / N / layer_num < layer_num)  throw std::runtime_error("Size too small: size < N * layer_num * layer_num");
+
+    uint pad_N = 1 << Log2(N);
+    uint new_N = pad_N * layer_num;
+
     assert(eval_point_.size() == Log2(size));
     fr_t *eval_point;
     cudaMalloc(&eval_point, sizeof(fr_t) * eval_point_.size());
@@ -243,37 +250,40 @@ Hyrax_proof Hyrax::open(FrTensor &tensor, const vector<Fr> eval_point_, Fr c, ui
     cudaMalloc(&c_dev, sizeof(fr_t)); 
     cudaMemcpy(c_dev, &c, sizeof(fr_t), cudaMemcpyHostToDevice);
 
-    Fr *host_d = new Fr[N];
+    Fr *host_d = new Fr[new_N];
 
     #pragma omp parallel for
-    for(int i = 0; i < N; i++) host_d[i] = Fr::random_element();
-    FrTensor d(N);
-    
-    cudaMemcpy(d.gpu_data, host_d, sizeof(fr_t) * N, cudaMemcpyHostToDevice);
+    for(uint i = 0; i < new_N; i++) host_d[i] = Fr::random_element();
+    FrTensor d(new_N);
+    cudaMemcpy(d.gpu_data, host_d, sizeof(fr_t) * new_N, cudaMemcpyHostToDevice);
     
     jacob_t *commit_d;
     cudaMalloc(&commit_d, sizeof(jacob_t));
 
-    single_commit(d.gpu_data, g_affine, commit_d, N, npoints);
+    single_commit(d.gpu_data, g_affine, commit_d, new_N, npoints);
 
-    FrTensor x(N);
+    FrTensor x(new_N);
 
-    tensor.partial_eval(size, eval_point, (size / layer) / N, Log2(N), N);
-    tensor.partial_eval(N * layer, eval_point, layer, Log2(size / layer), N);
+    
+    tensor.partial_eval(size, eval_point, (size / layer_num) / (N * layer_num), Log2(N * layer_num), N * layer_num);
+    //这里不能用new_N,因为tensor并没有pad   这里两行很关键
+    tensor.partial_eval((N * layer_num) * layer_num, eval_point, layer_num, Log2(size / layer_num), N * layer_num);
+
     x = tensor;
+    if(pad_N != N) x.pad(tensor, N, pad_N, new_N, Fr::zero());
     
     Fr result;
     
-    tensor.partial_eval(N, eval_point, N, 0, 1);
+    tensor.partial_eval(new_N, eval_point, new_N, 0, 1);  //这里就可以用new_N了，因为在pad x的时候tensor作为缓存也pad了
    
     cudaMemcpy(&result, tensor.gpu_data, sizeof(fr_t), cudaMemcpyDeviceToHost);
 
-    FrTensor z(N);
+    FrTensor z(new_N);
     z = x;
     z *= c_dev;
     z += d;
 
-    d.partial_eval(d.size, eval_point, N, 0, 1);
+    d.partial_eval(d.size, eval_point, new_N, 0, 1);
     
     Fr sum_ad;
     cudaMemcpy(&sum_ad, d.gpu_data, sizeof(fr_t), cudaMemcpyDeviceToHost);
@@ -283,20 +293,27 @@ Hyrax_proof Hyrax::open(FrTensor &tensor, const vector<Fr> eval_point_, Fr c, ui
     bn128 host_com_d;
     cudaMemcpy(&host_com_d, commit_d, sizeof(bn128), cudaMemcpyDeviceToHost);
 
-    Hyrax_proof proof(result, N, host_com_d, commit_ad);
+    Hyrax_proof proof(result, new_N, host_com_d, commit_ad);
 
-    cudaMemcpy(proof.z, z.gpu_data, sizeof(fr_t) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(proof.z, z.gpu_data, sizeof(fr_t) * new_N, cudaMemcpyDeviceToHost);
    
     cudaFree(c_dev);
     cudaFree(eval_point);
     cudaFree(commit_d);
     delete [] host_d;
-    
     return proof;
+}
+
+void Hyrax::verify(Hyrax_proof &proof, jacob_t *commitment, Fr c, uint size, uint N)
+{ 
+
 }
 
 jacob_t* Hyrax::commit(int *tensor, uint size, uint N)
 {
+    if(size / N / layer_num < layer_num)  throw std::runtime_error("Size too small: size < N * layer_num * layer_num");
+    if(N != 1 << Log2(N)) throw std::runtime_error("N must be a power of 2");
+    N = N * layer_num;
     jacob_t *commitment;
     cudaMalloc(&commitment, sizeof(jacob_t) * (size / N));
 
@@ -305,15 +322,22 @@ jacob_t* Hyrax::commit(int *tensor, uint size, uint N)
 
     uint thread = (size / N) * 32;
     int_windows_sum<<<(thread + 128 - 1) / 128, 128>>>(tensor, g_affine, tmp_out, size, N, npoints);
-
+    cudaDeviceSynchronize();
+    
     thread = (size / N) * 4;
     int_windows_reduce<<<(thread + 128 - 1) / 128, 128>>>(tmp_out, commitment);
+    cudaDeviceSynchronize();
+  
     cudaFree(tmp_out);
     return commitment;
 }
 
 jacob_t* Hyrax::commit(FrTensor &tensor, uint size, uint N)
 { 
+    if(size / N / layer_num < layer_num)  throw std::runtime_error("Size too small: size < N * layer_num * layer_num");
+    if(N !=1 << Log2(N)) throw std::runtime_error("N must be a power of 2");
+
+    N = N * layer_num;
     jacob_t *commitment;
     cudaMalloc(&commitment, sizeof(jacob_t) * (size / N));
     uint threads_per_block = 128;
@@ -323,10 +347,11 @@ jacob_t* Hyrax::commit(FrTensor &tensor, uint size, uint N)
     tensor.from();
     
     many_windows_sum<<<(size / N), threads_per_block>>>(tensor.gpu_data, g_affine, tmp_out, N, npoints);
+    cudaDeviceSynchronize();
     
     uint blocknum = 32 * (size / N) / threads_per_block;
     many_windows_reduce<<<blocknum, threads_per_block>>>(tmp_out, commitment, threads_per_block / 32);
-    
+    cudaDeviceSynchronize();
 
     tensor.to();
     cudaFree(tmp_out);

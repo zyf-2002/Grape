@@ -21,6 +21,7 @@ __global__ void naive_msm(jacob_t *P, affine_t *out, size_t N, size_t W);
 
 // ---------------- host function declarations ----------------
 vector<bn128> precompute_generators(uint N, uint W, affine_t *out);
+
 vector<Fr> random_vec(uint len);
 void generate_random_eval_points(size_t data_size, vector<Fr>& eval_point);
 
@@ -29,6 +30,8 @@ void ReassembleVectors(std::vector<Fr>& first,
                     size_t first_size,
                     size_t same_size,            //矩阵乘法的vector重组
                     size_t last_size);
+
+
 
 // ---------------- template function (header-only) ----------------
 template <typename T>

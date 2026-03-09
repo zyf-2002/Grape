@@ -70,14 +70,16 @@ public:
 
 class Hyrax {
 public:
+    uint layer_num;
     uint npoints;         // 点大小（没有预计算之前的数量）
     bn128 G;
     affine_t *g_affine;
 
-    Hyrax(uint npoints_, affine_t *g, bn128 &G_);
+    Hyrax(uint layer_num_, uint npoints_, affine_t *g, bn128 &G_);
     ~Hyrax();
 
     jacob_t* commit(int *tensor, uint size, uint N);
     jacob_t* commit(FrTensor &tensor, uint size, uint N);
-    Hyrax_proof open(FrTensor &tensor,const vector<Fr> eval_point_, Fr c, uint size, uint N, uint layer);
+    Hyrax_proof open(FrTensor &tensor,const vector<Fr> eval_point_, Fr c, uint size, uint N);
+    void verify(Hyrax_proof &proof, jacob_t *commitment, Fr c, uint size, uint N);
 };

@@ -74,4 +74,4 @@ public:
 
 // 辅助函数声明
 void Fr_partial_me(uint N, FrTensor& t, fr_t *x, uint id, uint cur_dim, uint window_size);
-void pad_int(int **int_data, uint L, uint first_size, uint second_size);
+void pad_int(int **int_data, uint N, uint pad_N, uint pad_size);

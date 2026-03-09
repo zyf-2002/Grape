@@ -27,6 +27,7 @@ __global__ void naive_msm(jacob_t *P, affine_t *out, size_t N, size_t W)
 }
 
 // ---------------- host implementations ----------------
+
 vector<bn128> precompute_generators(uint N, uint W, affine_t *out)
 {
     vector<bn128> generators(N);
@@ -119,3 +120,4 @@ void ReassembleVectors(std::vector<Fr>& first,
     first.resize(result1.size());
     std::copy(result1.begin(), result1.end(), first.begin());
 }
+

@@ -137,14 +137,12 @@ Polynomial tLookup_phase1_step_poly(const Fr& claim, const FrTensor& A, const Fr
     p0 = p0 * alpha;
     p0 *= Polynomial::eq(u.back());
 
-    //CUDA_TIMER_START(sum);
+    
     tLookup_poly_sum_kernel<<<((D >> 1)+256-1)/256,256>>>(
         A.gpu_data, temp0.gpu_data, temp1.gpu_data, D >> 1);
-    //CUDA_TIMER_STOP(sum);
+    cudaDeviceSynchronize();
 
-    //CUDA_TIMER_START(summ);
     Polynomial p1 ({temp0.sum(D >> 1), temp1.sum(D >> 1)});
-    //CUDA_TIMER_STOP(summ);
     
     cudaFree(d_beta);
     Fr two_inv = Fr(2).invert();
@@ -209,8 +207,8 @@ Fr tLookup_phase2(const Fr& claim, const FrTensor& A, const FrTensor& S, const F
         new_A.gpu_data, new_S.gpu_data, new_B.gpu_data, new_T.gpu_data, new_m.gpu_data,
         d_v2, A.size >> 1
     );
-    cudaFree(d_v2);
     cudaDeviceSynchronize();
+    cudaFree(d_v2);
     return tLookup_phase2(p(v2.back()), new_A, new_S, new_B, new_T, new_m, alpha_ * Polynomial::eq(u.back(), v2.back()), beta, inv_size_ratio, alpha_sq * Polynomial::eq(u.back(), v2.back()), {u.begin(), u.end() - 1}, {v2.begin(), v2.end() - 1});
 }
 
@@ -226,7 +224,6 @@ Fr tLookup_phase1(const Fr& claim, FrTensor& A, FrTensor& S, const FrTensor& B, 
 
         //CPU_TIMER_START(step1);
         auto p = tLookup_phase1_step_poly(claim, A, S, alpha, beta, C, u);
-        cudaDeviceSynchronize();
         //CPU_TIMER_STOP(step1);
         
         if (claim != p(0) + p(1)) throw std::runtime_error("tLookup_phase1: claim != p(0) + p(1)");
@@ -313,11 +310,12 @@ Fr tLookupRange::prove(FrTensor& S, FrTensor& A, const vector<Fr>& v, Hyrax &hyr
     cudaMalloc(&d_beta, sizeof(fr_t));
     cudaMemcpy(d_beta, &beta, sizeof(fr_t), cudaMemcpyHostToDevice);
     tlookup_inv_kernel<<<(D + 255) / 256, 256>>>(S.gpu_data, A.gpu_data, d_beta, D);
-    A.set_size(D);
     cudaDeviceSynchronize();
+    A.set_size(D);
+    
 
     hyrax.commit(A, D, msm_size);
-    cudaDeviceSynchronize();
+    hyrax.commit(m, N, 1 << (Log2(N) / 2));
 
     FrTensor Bm(B);   Bm *= m; 
     Fr C = alpha * alpha - Bm.sum(N);
@@ -353,13 +351,14 @@ tLookupRangeMapping::tLookupRangeMapping(const int low, const uint len, const st
     cudaMalloc((void **)&int_gpu_data, sizeof(int) * len);
     loadbin(filename, int_gpu_data, sizeof(int) * len);
     int_to_fr<<<(len+256-1)/256,256>>>(int_gpu_data, mapped_vals.gpu_data, len);
+    cudaDeviceSynchronize();
 
     fr_t *d_r; cudaMalloc(&d_r, sizeof(fr_t));  cudaMemcpy(d_r, &r, sizeof(fr_t), cudaMemcpyHostToDevice);
     Fr h_low = Fr(low);
     fr_t *d_low; cudaMalloc(&d_low, sizeof(fr_t));  cudaMemcpy(d_low, &h_low, sizeof(fr_t), cudaMemcpyHostToDevice);
     fr_t *d_beta; cudaMalloc(&d_beta, sizeof(fr_t));  cudaMemcpy(d_beta, &beta, sizeof(fr_t), cudaMemcpyHostToDevice);
     tLookupRangeMapping_init_kernel<<<(len + 256 - 1) / 256, 256>>>(T.gpu_data, B.gpu_data, mapped_vals.gpu_data, d_low, len, d_r, d_beta);
-
+    cudaDeviceSynchronize();
     cudaFree(int_gpu_data);
     cudaFree(d_r);
     cudaFree(d_low);
@@ -410,7 +409,6 @@ Fr tLookupRangeMapping::prove(FrTensor& S_in, FrTensor& S_out, FrTensor& A, cons
         Fr pad_value = mapped_vals(uint(-low)) * r;
         S.pad(A, 11008, 16384, 1 << Log2(D), pad_value);
         D = 1 << Log2(D);
-        cudaDeviceSynchronize();
     }
     A.set_size(D);
 
@@ -422,6 +420,8 @@ Fr tLookupRangeMapping::prove(FrTensor& S_in, FrTensor& S_out, FrTensor& A, cons
 
     assert(D % msm_size == 0);
     hyrax.commit(A, D, msm_size);    //commit A
+    hyrax.commit(m, N, 1 << (Log2(N) / 2));
+    
     
     if (v.size() != Log2(D)) throw std::runtime_error("v.size() != ceilLog2(D)");
 

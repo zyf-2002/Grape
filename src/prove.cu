@@ -60,6 +60,7 @@ Fr matmul_sumcheck_phase1(FrTensor &A, FrTensor &B, FrTensor &a, FrTensor &b, Fr
         sumcheck_kernel<<<(outputsize + 255) / 256, 256>>>(
             A.gpu_data, B.gpu_data, a.gpu_data, b.gpu_data, c.gpu_data, 
             inputsize, outputsize, v - i - 1);
+        cudaDeviceSynchronize();
         
         a.partial_eval(outputsize, u - rounds, outputsize / K, 0, K);
         b.partial_eval(outputsize, u - rounds, outputsize / K, 0, K);
@@ -95,6 +96,7 @@ void matmul_sumcheck_phase2(FrTensor &A, FrTensor &B, FrTensor &a, FrTensor &b, 
         sumcheck_kernel<<<(outputsize + 255) / 256, 256>>>(
             A.gpu_data, B.gpu_data, a.gpu_data, b.gpu_data, c.gpu_data, 
             inputsize, outputsize, v - i - 1);
+        cudaDeviceSynchronize();
         
         Polynomial p({
             c.sum(outputsize) * eq_accumulate, 
@@ -133,7 +135,8 @@ Fr eleMul_sumcheck(FrTensor &A, FrTensor &B, FrTensor &a, FrTensor &b, FrTensor 
         sumcheck_kernel<<<(outputsize + 255) / 256, 256>>>(
             A.gpu_data, B.gpu_data, a.gpu_data, b.gpu_data, c.gpu_data, 
             inputsize, outputsize, v - i - 1);
-            
+        cudaDeviceSynchronize();
+
         if(inputsize > second_size){
             a.partial_eval(outputsize, u - Log2(first_size), outputsize / second_size, 0, second_size);
             a.partial_eval(second_size, u - Log2(size), second_size, 0, 1);
@@ -264,6 +267,7 @@ Fr combine_claims(FrTensor &X, const vector<Fr> &claims,
         cudaMemcpy(d_v, &new_v.back(), sizeof(fr_t), cudaMemcpyHostToDevice);
 
         sumcheck_kernel<<<(output_size + 255) / 256, 256>>>(X.gpu_data, a.gpu_data, b.gpu_data, input_size, output_size, d_v);
+        cudaDeviceSynchronize();
 
         Polynomial p(2);
         for(uint j = 0; j < num; j++){

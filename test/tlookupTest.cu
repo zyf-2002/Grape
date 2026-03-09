@@ -25,9 +25,9 @@ int main(int argc, char* argv[])
     ppT::init_public_params();
 
     affine_t *points;
-    cudaMalloc((void **)&points, sizeof(affine_t) * npoints * W);
-    auto cpu_points = precompute_generators(npoints, W, points);
-    Hyrax hyrax(npoints, points, cpu_points[0]);
+    cudaMalloc((void **)&points, sizeof(affine_t) * npoints * W * layer_num);
+    auto cpu_points = precompute_generators(npoints * layer_num, W, points);
+    Hyrax hyrax(layer_num, npoints, points, cpu_points[0]);
     CUDA_DEBUG;
 
 
