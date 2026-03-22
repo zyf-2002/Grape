@@ -112,6 +112,7 @@ __global__ void tLookup_phase2_reduce_kernel(const fr_t* A_data, const fr_t* S_d
     }
 }
 
+Timer timer;
 // 辅助函数定义--------------------------------------------------------------------------------------------
 Polynomial tLookup_phase1_step_poly(const Fr& claim, const FrTensor& A, const FrTensor& S, 
     const Fr& alpha, const Fr& beta, const Fr& C, const vector<Fr>& u)
@@ -225,6 +226,7 @@ Fr tLookup_phase1(const Fr& claim, FrTensor& A, FrTensor& S, const FrTensor& B, 
         //CPU_TIMER_START(step1);
         auto p = tLookup_phase1_step_poly(claim, A, S, alpha, beta, C, u);
         //CPU_TIMER_STOP(step1);
+        //CUDA_DEBUG;
         
         if (claim != p(0) + p(1)) throw std::runtime_error("tLookup_phase1: claim != p(0) + p(1)");
        
@@ -283,7 +285,8 @@ void tLookupRange::prep(const FrTensor& vals){
     cudaFree(d_low);
 }
 
-Fr tLookupRange::prove(FrTensor& S, FrTensor& A, const vector<Fr>& v, Hyrax &hyrax, uint msm_size)
+Fr tLookupRange::prove(FrTensor& S, FrTensor& A, const vector<Fr>& v, 
+                            Hyrax &hyrax, uint msm_size, double& commit_time)
 { 
     uint D = S.size;
     const uint N = T.size;
@@ -313,9 +316,11 @@ Fr tLookupRange::prove(FrTensor& S, FrTensor& A, const vector<Fr>& v, Hyrax &hyr
     cudaDeviceSynchronize();
     A.set_size(D);
     
-
+    timer.start();
     hyrax.commit(A, D, msm_size);
     hyrax.commit(m, N, 1 << (Log2(N) / 2));
+    CUDA_DEBUG;
+    commit_time += timer.stop("commit A m");
 
     FrTensor Bm(B);   Bm *= m; 
     Fr C = alpha * alpha - Bm.sum(N);
@@ -389,7 +394,8 @@ void tLookupRangeMapping::prep(const FrTensor& vals){
     cudaFree(d_low);
 }
 
-Fr tLookupRangeMapping::prove(FrTensor& S_in, FrTensor& S_out, FrTensor& A, const vector<Fr>& v, Hyrax &hyrax, uint msm_size)
+Fr tLookupRangeMapping::prove(FrTensor& S_in, FrTensor& S_out, FrTensor& A, const vector<Fr>& v, 
+                                Hyrax &hyrax, uint msm_size, double& commit_time)
 {
     uint D = S_in.size;
     uint N = m.size;
@@ -419,8 +425,12 @@ Fr tLookupRangeMapping::prove(FrTensor& S_in, FrTensor& S_out, FrTensor& A, cons
 
 
     assert(D % msm_size == 0);
-    hyrax.commit(A, D, msm_size);    //commit A
+
+    timer.start();
+    hyrax.commit(A, D, msm_size);    
     hyrax.commit(m, N, 1 << (Log2(N) / 2));
+    CUDA_DEBUG;
+    commit_time += timer.stop("commit A m");
     
     
     if (v.size() != Log2(D)) throw std::runtime_error("v.size() != ceilLog2(D)");

@@ -49,11 +49,11 @@ using namespace std;
     } while (0)
 
 
-void savebin(const string& filename, const void* data, uint size, bool is_gpu_data = true);
+void savebin(const string& filename, const void* data, size_t size, bool is_gpu_data = true);
 
 ulong findsize(const string& filename);
 
-void loadbin(const string& filename, void* data, ulong size, bool is_gpu_data = true);
+void loadbin(const string& filename, void* data, size_t size, bool is_gpu_data = true);
 
 uint Log2(uint num);
 

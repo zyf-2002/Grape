@@ -125,7 +125,7 @@ __global__ void single_windows_reduce(jacob_t *in, jacob_t *out, uint num)
     if(lane_id == 0) out[0] = sum;
 }
 
-__global__ void many_windows_sum(fr_t* scalars, affine_t *point, jacob_t *out, uint N, uint npoints)
+__global__ void many_windows_sum (fr_t* scalars, affine_t *point, jacob_t *out, uint N, uint npoints)
 {
     uint lane_id = GET_LANE_ID();
     uint warp_id = GET_WARP_ID();
@@ -226,7 +226,7 @@ Hyrax_proof& Hyrax_proof::operator=(const Hyrax_proof& other) {
     }
 
 Hyrax::Hyrax(uint layer_num_, uint npoints_, affine_t *g, bn128 &G_)
-    : layer_num(layer_num_), npoints(npoints_ * layer_num_), g_affine(g), G(G_)
+    : layer_num(layer_num_), com_scale(16), npoints(npoints_ * com_scale), g_affine(g), G(G_)
 {
 }
 
@@ -236,10 +236,10 @@ Hyrax::~Hyrax()
 
 Hyrax_proof Hyrax::open(FrTensor &tensor, const vector<Fr> eval_point_, Fr c, uint size, uint N)
 {
-    if(size / N / layer_num < layer_num)  throw std::runtime_error("Size too small: size < N * layer_num * layer_num");
+    if(size / N / com_scale < layer_num)  throw std::runtime_error("Size too small: size < N * com_scale * layer_num");
 
     uint pad_N = 1 << Log2(N);
-    uint new_N = pad_N * layer_num;
+    uint new_N = pad_N * com_scale;
 
     assert(eval_point_.size() == Log2(size));
     fr_t *eval_point;
@@ -265,9 +265,9 @@ Hyrax_proof Hyrax::open(FrTensor &tensor, const vector<Fr> eval_point_, Fr c, ui
     FrTensor x(new_N);
 
     
-    tensor.partial_eval(size, eval_point, (size / layer_num) / (N * layer_num), Log2(N * layer_num), N * layer_num);
+    tensor.partial_eval(size, eval_point, (size / layer_num) / (N * com_scale), Log2(N * com_scale), N * com_scale);
     //这里不能用new_N,因为tensor并没有pad   这里两行很关键
-    tensor.partial_eval((N * layer_num) * layer_num, eval_point, layer_num, Log2(size / layer_num), N * layer_num);
+    tensor.partial_eval((N * com_scale) * layer_num, eval_point, layer_num, Log2(size / layer_num), N * com_scale);
 
     x = tensor;
     if(pad_N != N) x.pad(tensor, N, pad_N, new_N, Fr::zero());
@@ -311,9 +311,9 @@ void Hyrax::verify(Hyrax_proof &proof, jacob_t *commitment, Fr c, uint size, uin
 
 jacob_t* Hyrax::commit(int *tensor, uint size, uint N)
 {
-    if(size / N / layer_num < layer_num)  throw std::runtime_error("Size too small: size < N * layer_num * layer_num");
+    if(size / N / com_scale < layer_num)  throw std::runtime_error("Size too small: size < N * com_scale * layer_num");
     if(N != 1 << Log2(N)) throw std::runtime_error("N must be a power of 2");
-    N = N * layer_num;
+    N = N * com_scale;
     jacob_t *commitment;
     cudaMalloc(&commitment, sizeof(jacob_t) * (size / N));
 
@@ -334,10 +334,10 @@ jacob_t* Hyrax::commit(int *tensor, uint size, uint N)
 
 jacob_t* Hyrax::commit(FrTensor &tensor, uint size, uint N)
 { 
-    if(size / N / layer_num < layer_num)  throw std::runtime_error("Size too small: size < N * layer_num * layer_num");
+    if(size / N / com_scale < layer_num)  throw std::runtime_error("Size too small: size < N * com_scale * layer_num");
     if(N !=1 << Log2(N)) throw std::runtime_error("N must be a power of 2");
 
-    N = N * layer_num;
+    N = N * com_scale;
     jacob_t *commitment;
     cudaMalloc(&commitment, sizeof(jacob_t) * (size / N));
     uint threads_per_block = 128;

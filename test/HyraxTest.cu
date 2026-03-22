@@ -9,11 +9,10 @@
 using namespace std;
 using namespace libsnark;
 
-const uint N = 1024;   
+const uint N = 11008;   
 const uint W = 1 << 8;  //pre_windows
-const uint layer_num = 4;
 uint npoints = 16384;
-
+uint com_scale = 16;
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
@@ -24,20 +23,23 @@ int main(int argc, char *argv[])
     
     ppT::init_public_params();
     affine_t *points;
-    cudaMalloc((void **)&points, sizeof(affine_t) * npoints * W * layer_num);
-    auto cpu_points = precompute_generators(npoints * layer_num, W, points);
+    cudaMalloc((void **)&points, npoints * com_scale * sizeof(affine_t) * W);
+    loadbin("../data/points.bin", points, npoints * com_scale * sizeof(affine_t) * W);
+    vector<bn128> cpu_points(npoints * com_scale);
+    loadbin("../data/cpu_points.bin", cpu_points.data(), npoints * com_scale * sizeof(bn128), false);
     CUDA_DEBUG;
 
     cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
 
     int *tensor = nullptr;
-    string filename = "../data/W/NormSecond-7.bin";
+    string filename = "../data/R/up_out-7.bin";
     CPU_TIMER_START(load_data);
     uint size = load_data(filename, &tensor);
 
     //auto size = findsize(filename) / sizeof(int);
     //generate_data(&tensor, size);
     size = size / (4 / layer_num);
+    cout << "size: " << size << endl;
     CUDA_DEBUG;
     CPU_TIMER_STOP(load_data);
 
@@ -46,25 +48,26 @@ int main(int argc, char *argv[])
     Hyrax hyrax(layer_num, npoints, points, cpu_points[0]);
     CUDA_DEBUG;
     FrTensor fr_tensor(size, tensor);
-    // FrTensor t1(1 << Log2(size));   FrTensor t2(1 << Log2(size));
-    // CUDA_DEBUG;
-    // t1.get_data(size, tensor);
-    // CUDA_DEBUG;
-    // t1.pad(t2, N, 1 << Log2(N), t2.size, Fr::zero());
-    // printf("hello\n");
-    // CUDA_DEBUG;
+
+    FrTensor t1(size / N * (1<<Log2(N)));   FrTensor t2(size / N * (1<<Log2(N)));
+    CUDA_DEBUG;
+    t1.get_data(size, tensor);
+    CUDA_DEBUG;
+    t1.pad(t2, N, 1 << Log2(N), t2.size, Fr::zero());
+    
+    CUDA_DEBUG;
     CPU_TIMER_START(commit);
     pad_int(&tensor, N, 1 << Log2(N), (size/N)*(1<<Log2(N)));
     jacob_t *commitment = hyrax.commit(tensor, (size/N)*(1<<Log2(N)), 1 << Log2(N));
     CUDA_DEBUG;
     CPU_TIMER_STOP(commit);
 
-    // CPU_TIMER_START(commit_fr);
-    // jacob_t *commitment = hyrax.commit(t1, 1 << Log2(size), 1 << Log2(N));
-    // CUDA_DEBUG;
-    // CPU_TIMER_STOP(commit_fr);
+    CPU_TIMER_START(commit_fr);
+    jacob_t *commitment1 = hyrax.commit(t1, (size/N)*(1<<Log2(N)), 1 << Log2(N));
+    CUDA_DEBUG;
+    CPU_TIMER_STOP(commit_fr);
 
-    // check_G_equal<<<(size / N / layer_num) / 128, 128>>>(commitment1, commitment, size / N / layer_num);
+    check_G_equal<<<(size / N / com_scale) / 128, 128>>>(commitment1, commitment, size / N / layer_num);
 
     cout<<"----------------------------------"<<"commit done"<< "----------------------------------"<<endl;
 
@@ -85,15 +88,15 @@ int main(int argc, char *argv[])
 
 
     CPU_TIMER_START(verify);
-    bn128 *host_commitment = new bn128[size / N / layer_num];
-    cudaMemcpy(host_commitment, commitment, sizeof(jacob_t) * (size / N / layer_num), cudaMemcpyDeviceToHost);
-    uint start_x = Log2(N * layer_num);
+    bn128 *host_commitment = new bn128[size / N / com_scale];
+    cudaMemcpy(host_commitment, commitment, sizeof(jacob_t) * (size / N / com_scale), cudaMemcpyDeviceToHost);
+    uint start_x = Log2(N * com_scale);
     bn128 *layer_C_ = new bn128[layer_num];
     bn128 C_;
 
     
     for(int i = 0; i < layer_num; i++){
-        layer_C_[i] = host_partial_me<bn128>(host_commitment + i * (size / layer_num / N / layer_num), size / N / layer_num / layer_num, eval_point.begin() + start_x, eval_point.end() - Log2(layer_num));
+        layer_C_[i] = host_partial_me<bn128>(host_commitment + i * (size / com_scale / N / layer_num), size / N / com_scale / layer_num, eval_point.begin() + start_x, eval_point.end() - Log2(layer_num));
     }
     C_ = host_partial_me<bn128>(layer_C_, layer_num, eval_point.begin() + Log2(size / layer_num), eval_point.end());
     
@@ -104,7 +107,7 @@ int main(int argc, char *argv[])
     {
         bn128 local = bn128::zero();
         #pragma omp for
-        for (int j = 0; j < (1 << Log2(N)) * layer_num; j++) {
+        for (int j = 0; j < (1 << Log2(N)) * com_scale; j++) {
             local = local + proof.z[j] * cpu_points[j];
         }
         #pragma omp critical
@@ -118,7 +121,7 @@ int main(int argc, char *argv[])
 
     Fr az;
 
-    az = host_partial_me<Fr>(proof.z, (1 << Log2(N)) * layer_num, eval_point.begin(), eval_point.begin() + start_x);
+    az = host_partial_me<Fr>(proof.z, (1 << Log2(N)) * com_scale, eval_point.begin(), eval_point.begin() + start_x);
     
     bn128 left = (c * proof.result) * cpu_points[0] + proof.commit_ad;
     bn128 right = az * cpu_points[0];

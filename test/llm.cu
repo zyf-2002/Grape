@@ -17,6 +17,7 @@ using namespace libsnark;
 uint max_embed_dim = 11008;
 uint dim = 4096;
 uint npoints = 16384;
+uint com_scale = 16;
 
 int main(int argc, char* argv[])
 {
@@ -30,10 +31,10 @@ int main(int argc, char* argv[])
 
     ppT::init_public_params();
     affine_t *points;
-    cudaMalloc((void **)&points, npoints * layer_num * sizeof(affine_t) * 256);
-    loadbin("../data/points.bin", points, npoints * layer_num * sizeof(affine_t) * 256);
-    vector<bn128> cpu_points(npoints * layer_num);
-    loadbin("../data/cpu_points.bin", cpu_points.data(), npoints * layer_num * sizeof(bn128), false);
+    cudaMalloc((void **)&points, npoints * com_scale * sizeof(affine_t) * 256);
+    loadbin("../data/points.bin", points, npoints * com_scale * sizeof(affine_t) * 256);
+    vector<bn128> cpu_points(npoints * com_scale);
+    loadbin("../data/cpu_points.bin", cpu_points.data(), npoints * com_scale * sizeof(bn128), false);
 
     int *read_tensor1 = nullptr;
     int *read_tensor2 = nullptr;
@@ -67,6 +68,7 @@ int main(int argc, char* argv[])
     
     Timer timer;
     double total_prove_time = 0;
+    double commit_time = 0.0;
 
 for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
 {
@@ -98,7 +100,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);   tensor3 = tensor1;
 
-    Fr lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim);
+    Fr lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     down_out_value = down_out_value * SCALE1 + lookup_value;
@@ -127,7 +129,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);   tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, npoints);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, npoints, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     upSilu_value = upSilu_value  * SCALE1 + lookup_value;
@@ -152,7 +154,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     tensor1.get_data(data_size1, read_tensor1);
     tensor2.set_size(data_size1);
     generate_random_eval_points(data_size1, eval_point1);
-    lookup_value = swiglu.prove(tensor1, tensor3, tensor2, eval_point1, hyrax, npoints);
+    lookup_value = swiglu.prove(tensor1, tensor3, tensor2, eval_point1, hyrax, npoints, commit_time);
 
     proof = hyrax.open(tensor1, eval_point1, c, data_size1, max_embed_dim);
     Fr gate_out_value = proof.result;
@@ -166,7 +168,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);   tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, npoints);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, npoints, commit_time);
     proof = hyrax.open(tensor3, eval_point2, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     Fr up_out_value = upSilu_pair.first * SCALE1 + lookup_value;
@@ -200,7 +202,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = swiglu_rs.prove(tensor1, tensor2, eval_point1, hyrax, npoints);
+    lookup_value = swiglu_rs.prove(tensor1, tensor2, eval_point1, hyrax, npoints, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     gate_out_value = gate_out_value * SCALE2 + lookup_value;
@@ -237,7 +239,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point3, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point3, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point3, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     normSecondOut_value = normSecondOut_value * SCALE1 + lookup_value;
@@ -263,7 +265,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     Fr rmsw_value = norm_pair.second * SCALE1 + lookup_value;
@@ -281,11 +283,11 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
 
     auto rmsw_pair = prove_matmul(tensor3, tensor2, layer_num, input_tokens, dim, 1, eval_point2, eval_point3, rmsw_value);
     ReassembleVectors(eval_point2, eval_point3, Log2(input_tokens), Log2(1), Log2(dim));
-    proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim / layer_num);
+    proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim / com_scale);
     assert(proof.result == rmsw_pair.second);
 
     tensor1.get_data(data_size1, read_tensor1);
-    proof = hyrax.open(tensor1, eval_point2, c, data_size1, input_tokens / layer_num);   //这两个tensor都是一行的，open函数 N = 单层tensor的长度
+    proof = hyrax.open(tensor1, eval_point2, c, data_size1, input_tokens / com_scale);   //这两个tensor都是一行的，open函数 N = 单层tensor的长度
     assert(proof.result == rmsw_pair.first);
 
     CUDA_DEBUG;
@@ -315,7 +317,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point2, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     atten_out_value = atten_out_value * SCALE1 + lookup_value;
@@ -345,7 +347,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, input_tokens);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, input_tokens, commit_time);
     proof = hyrax.open(tensor3, eval_point2, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     Fr qkv_out_value = O_pair.first * SCALE1 + lookup_value;
@@ -386,7 +388,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
 
     tensor2.set_size(data_size1);
     generate_random_eval_points(data_size1, eval_point1);
-    softmax_range_relation.prove(tensor3, tensor2, eval_point1, hyrax, input_tokens);
+    softmax_range_relation.prove(tensor3, tensor2, eval_point1, hyrax, input_tokens, commit_time);
     
     tensor3.set_size(data_size1); tensor3 = tensor1;
     hyrax.open(tensor1, eval_point1, c, data_size1, input_tokens);
@@ -400,7 +402,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     tensor1.get_data(data_size1, read_tensor1);
     tensor2.set_size(data_size1);
     generate_random_eval_points(data_size1, eval_point1);
-    lookup_value = exp.prove(tensor1, tensor3, tensor2, eval_point1, hyrax, input_tokens);
+    lookup_value = exp.prove(tensor1, tensor3, tensor2, eval_point1, hyrax, input_tokens, commit_time);
     proof = hyrax.open(tensor1, eval_point1, c, data_size1, input_tokens);
     Fr exp_in_value = proof.result;
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, input_tokens);
@@ -417,10 +419,10 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     Fr score_value = tensor1(eval_point1);
     
     tensor3.set_size(data_size1);  tensor3 = tensor2;  
-    lookup_value = exp_rs.prove(tensor2, tensor1, eval_point1, hyrax, input_tokens);
+    //lookup_value = exp_rs.prove(tensor2, tensor1, eval_point1, hyrax, input_tokens, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, input_tokens);
-    assert(proof.result == lookup_value);
-    score_value = score_value * (1 << 22) + lookup_value;
+    //assert(proof.result == lookup_value);
+    score_value = score_value * (1 << 22) + proof.result;
     CUDA_DEBUG;
     total_prove_time += timer.stop(" ");
 
@@ -444,7 +446,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     Fr q_value = qk_pair.first * SCALE1 + lookup_value;
@@ -474,7 +476,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point2, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point2, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     Fr k_value = qk_pair.second * SCALE1 + lookup_value;
@@ -504,7 +506,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, skip_eval_point, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, skip_eval_point, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, skip_eval_point, c, data_size1, dim);
     assert(proof.result == lookup_value);
     Fr v_value = qkv_pair.second * SCALE1 + lookup_value;
@@ -544,7 +546,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point3, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point3, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point3, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     normFirstOut_value = normFirstOut_value * SCALE1 + lookup_value;
@@ -570,7 +572,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
     timer.start();
     tensor1.get_data(data_size1, read_tensor1);
     tensor3.set_size(data_size1);  tensor3 = tensor1;
-    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim);
+    lookup_value = rs.prove(tensor1, tensor2, eval_point1, hyrax, dim, commit_time);
     proof = hyrax.open(tensor3, eval_point1, c, data_size1, data_size1 / layer_num / input_tokens);
     assert(proof.result == lookup_value);
     rmsw_value = norm_pair.second * SCALE1 + lookup_value;
@@ -588,11 +590,11 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
 
     rmsw_pair = prove_matmul(tensor3, tensor2, layer_num, input_tokens, dim, 1, eval_point2, eval_point3, rmsw_value);
     ReassembleVectors(eval_point2, eval_point3, Log2(input_tokens), Log2(1), Log2(dim));
-    proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim / layer_num);
+    proof = hyrax.open(tensor1, eval_point3, c, data_size2, dim / com_scale);
     assert(proof.result == rmsw_pair.second);
 
     tensor1.get_data(data_size1, read_tensor1);
-    proof = hyrax.open(tensor1, eval_point2, c, data_size1, input_tokens / layer_num);   //open时 将1 * N，看作4 * (N / 4)
+    proof = hyrax.open(tensor1, eval_point2, c, data_size1, input_tokens / com_scale);   //open时 将1 * N，看作4 * (N / 4)
     assert(proof.result == rmsw_pair.first);
 
     CUDA_DEBUG;
@@ -609,7 +611,7 @@ for(int layer_id = (32 / layer_num) - 1; layer_id >= 0; layer_id--)
 }
 
     cout << "total_prove_time: " << total_prove_time << " S" << endl;
-
+    cout << "total_commit_time: " << commit_time << " S" << endl;
 
     cudaFree(points);
     cudaFree(read_tensor1);

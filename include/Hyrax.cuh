@@ -70,6 +70,7 @@ public:
 
 class Hyrax {
 public:
+    uint com_scale;
     uint layer_num;
     uint npoints;         // 点大小（没有预计算之前的数量）
     bn128 G;

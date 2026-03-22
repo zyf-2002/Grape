@@ -14,8 +14,8 @@ using namespace libsnark;
 uint npoints = 16384;
 uint W = 1 << 8;  //pre_windows
 uint input_tokens = 2048;
-uint layer_num = 1;
-
+uint layer_num = 4;
+uint com_scale = 16;
 struct FileInfo {
     std::string relative_path;  
     uint N;
@@ -25,11 +25,10 @@ int main(int argc, char* argv[])
 {
     ppT::init_public_params();
     affine_t *points;
-    cudaMalloc((void **)&points, sizeof(affine_t) * npoints * W * layer_num);
-    auto cpu_points = precompute_generators(npoints * layer_num, W, points);
-
-    savebin("../data/points.bin", points, sizeof(affine_t) * npoints * W * layer_num);
-    savebin("../data/cpu_points.bin", cpu_points.data(), cpu_points.size() * sizeof(bn128), false);
+    cudaMalloc((void **)&points, npoints * com_scale * sizeof(affine_t) * W);
+    loadbin("../data/points.bin", points, npoints * com_scale * sizeof(affine_t) * W);
+    vector<bn128> cpu_points(npoints * com_scale);
+    loadbin("../data/cpu_points.bin", cpu_points.data(), npoints * com_scale * sizeof(bn128), false);
     CUDA_DEBUG;
 
     Hyrax hyrax(layer_num, npoints, points, cpu_points[0]);
@@ -41,8 +40,8 @@ int main(int argc, char* argv[])
         {"down-", 11008},
         {"up-", 4096},
         {"gate-", 4096},
-        {"NormSecond-", 4096 / layer_num},
-        {"NormFirst-", 4096 / layer_num},
+        {"NormSecond-", 4096 / com_scale},
+        {"NormFirst-", 4096 / com_scale},
         {"O-", 4096},
         {"K-", 4096},
         {"Q-", 4096},
@@ -63,8 +62,8 @@ int main(int argc, char* argv[])
             CUDA_DEBUG;
             w_commit_time += timer.stop("commit_w");
 
-            string com_filename = "../data/comW/" + file.relative_path;
-            savebin(com_filename, commitment, sizeof(jacob_t) * (size / N / layer_num));
+            string com_filename = "../data/comW/" + file.relative_path + to_string(l) + ".bin";
+            savebin(com_filename, commitment, sizeof(jacob_t) * (size / N / com_scale));
             CUDA_DEBUG;
             cout << "Processed: " << filename 
                 << ", N = " << N 
@@ -110,8 +109,8 @@ int main(int argc, char* argv[])
             CUDA_DEBUG;
             r_commit_time += timer.stop("commit_r");
 
-            string com_filename = "../data/comR/" + file.relative_path;
-            savebin(com_filename, commitment, sizeof(jacob_t) * (size / N / layer_num));
+            string com_filename = "../data/comR/" + file.relative_path + to_string(l) + ".bin";
+            savebin(com_filename, commitment, sizeof(jacob_t) * (size / N / com_scale));
             CUDA_DEBUG;
             cout << "Processed: " << filename 
                 << ", N = " << N 
@@ -128,8 +127,8 @@ int main(int argc, char* argv[])
         {"exp_input-", input_tokens},
         {"exp_output-", input_tokens},
         {"softmax_output-", input_tokens},
-        {"rmsFirst-", input_tokens / layer_num},
-        {"rmsSecond-", input_tokens / layer_num},
+        {"rmsFirst-", input_tokens / com_scale},
+        {"rmsSecond-", input_tokens / com_scale},
         {"gate_out-", 11008},
         {"silu_out-", 11008},
         {"input-", 4096},
@@ -151,8 +150,8 @@ int main(int argc, char* argv[])
             CUDA_DEBUG;
             q_commit_time += timer.stop("commit_q");    
 
-            string com_filename = "../data/comQ/" + file.relative_path;
-            savebin(com_filename, commitment, sizeof(jacob_t) * (size / N / layer_num));
+            string com_filename = "../data/comQ/" + file.relative_path + to_string(l) + ".bin";
+            savebin(com_filename, commitment, sizeof(jacob_t) * (size / N / com_scale));
             CUDA_DEBUG;
             cout << "Processed: " << filename 
                 << ", N = " << N 

@@ -832,7 +832,7 @@ class Transformer(nn.Module):
             torch.Tensor: Output logits after applying the Transformer model.
 
         """
-        data_dirs = ['../data/Q/', '../data/W/', '../data/R/']
+        data_dirs = ['../data/Q/', '../data/W/', '../data/R/', '../data/comQ', '../data/comW', '../data/comR']
         clear_bin_files(data_dirs)
         
         _bsz, seqlen = tokens.shape

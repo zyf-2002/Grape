@@ -15,6 +15,7 @@ int lower = - (1 << 20) + 1;
 // uint length = 1 << 19;
 uint length = 1 << 20;
 uint npoints = 16384;
+uint com_scale = 16;
 const size_t W = 1 << 8;  //pre_windows
 int main(int argc, char* argv[])
 {
@@ -26,11 +27,13 @@ int main(int argc, char* argv[])
 
     ppT::init_public_params();
     affine_t *points;
-    cudaMalloc((void **)&points, sizeof(affine_t) * npoints * W * layer_num);
-    auto cpu_points = precompute_generators(npoints * layer_num, W, points);
-    Hyrax hyrax(layer_num, npoints, points, cpu_points[0]);
+    cudaMalloc((void **)&points, npoints * com_scale * sizeof(affine_t) * W);
+    loadbin("../data/points.bin", points, npoints * com_scale * sizeof(affine_t) * W);
+    vector<bn128> cpu_points(npoints * com_scale);
+    loadbin("../data/cpu_points.bin", cpu_points.data(), npoints * com_scale * sizeof(bn128), false);
     CUDA_DEBUG;
 
+    Hyrax hyrax(layer_num, npoints, points, cpu_points[0]);
 
     CPU_TIMER_START(read_data);
     
@@ -57,9 +60,10 @@ int main(int argc, char* argv[])
     s_in.get_data(in_size, in_data);
     s_out.get_data(out_size, out_data);
 
+    double com_time = 0;
     CPU_TIMER_START(prove);
     auto v = random_vec(Log2(in_size));
-    exp.prove(s_in, s_out, A, v, hyrax, 2048);
+    exp.prove(s_in, s_out, A, v, hyrax, 2048, com_time);
     CUDA_DEBUG;
     CPU_TIMER_STOP(prove);
     cout <<"--------------------------------------------------------------------" << endl;

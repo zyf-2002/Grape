@@ -1,6 +1,6 @@
 #include "ioutils.cuh"
 
-void savebin(const string& filename, const void* data, uint size, bool is_gpu_data)
+void savebin(const string& filename, const void* data, size_t size, bool is_gpu_data)
 {
     if (!data || size == 0) {
         fprintf(stderr, "Error: Invalid input parameters\n");
@@ -61,7 +61,7 @@ ulong findsize(const string& filename)
     return size;
 }
 
-void loadbin(const string& filename, void* data, ulong size, bool is_gpu_data)
+void loadbin(const string& filename, void* data, size_t size, bool is_gpu_data)
 {
     if (!data || size == 0) {
         fprintf(stderr, "Error: Invalid input parameters\n");

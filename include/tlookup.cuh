@@ -4,6 +4,7 @@
 #include "polynomial.cuh"
 #include "ioutils.cuh"
 #include "Hyrax.cuh"
+#include "timer.cuh"
 
 // 内核函数声明
 __global__ void get_histogram_kernel(const fr_t* value, uint *hist, uint size, fr_t *low);
@@ -59,7 +60,8 @@ class tLookupRange: public tLookup
     
     void prep(const FrTensor& vals);
 
-    Fr prove(FrTensor& S,  FrTensor& A, const vector<Fr>& v, Hyrax &hyrax, uint msm_size);
+    Fr prove(FrTensor& S,  FrTensor& A, const vector<Fr>& v, 
+                Hyrax &hyrax, uint msm_size, double& commit_time);
 };
 
 class tLookupRangeMapping : public tLookup
@@ -72,5 +74,6 @@ class tLookupRangeMapping : public tLookup
 
     void prep(const FrTensor& vals);
     
-    Fr prove(FrTensor& S_in, FrTensor& S_out, FrTensor &A, const vector<Fr>& v, Hyrax &hyrax, uint msm_size);
+    Fr prove(FrTensor& S_in, FrTensor& S_out, FrTensor &A, const vector<Fr>& v, 
+                Hyrax &hyrax, uint msm_size, double& commit_time);
 };

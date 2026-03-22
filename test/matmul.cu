@@ -24,10 +24,10 @@ int main(int argc, char* argv[])
 
     CPU_TIMER_START(read_data);
     int *up_data = nullptr;
-    uint up_size = load_data("../data/W/NormFirst-7.bin", &up_data);
+    uint up_size = load_data("../data/W/up-7.bin", &up_data);
     up_size /= (4 / layer_num);
     int *x_data = nullptr;
-    uint x_size = load_data("../data/Q/rmsFirst-7.bin", &x_data);
+    uint x_size = load_data("../data/Q/ffn_input-7.bin", &x_data);
     x_size /= (4 / layer_num);
     int *y_data = nullptr;
     uint y_size = load_data("../data/Q/up_out-7.bin", &y_data);
