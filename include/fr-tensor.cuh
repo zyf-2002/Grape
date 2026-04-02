@@ -70,6 +70,9 @@ public:
     FrTensor& operator*=(fr_t *x);
     FrTensor& operator*=(const uint x);
     FrTensor& operator*=(Fr &x);
+
+    static FrTensor random(uint size);
+
 };
 
 // 辅助函数声明

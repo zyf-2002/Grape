@@ -9,7 +9,7 @@
 using namespace std;
 using namespace libsnark;
 
-const uint N = 11008;   
+const uint N = 4096;   
 const uint W = 1 << 8;  //pre_windows
 uint npoints = 16384;
 uint com_scale = 16;
@@ -32,13 +32,15 @@ int main(int argc, char *argv[])
     cout<<"----------------------------------"<<"precompute done"<< "----------------------------------"<<endl;
 
     int *tensor = nullptr;
-    string filename = "../data/R/up_out-7.bin";
+    string filename = "../data/W/K-7.bin";
     CPU_TIMER_START(load_data);
-    uint size = load_data(filename, &tensor);
+    //uint size = load_data(filename, &tensor);
 
     //auto size = findsize(filename) / sizeof(int);
-    //generate_data(&tensor, size);
+    auto size = 4096 * 4096 * 4;
     size = size / (4 / layer_num);
+    generate_data(&tensor, size);
+    //size = size / (4 / layer_num);
     cout << "size: " << size << endl;
     CUDA_DEBUG;
     CPU_TIMER_STOP(load_data);
@@ -49,13 +51,8 @@ int main(int argc, char *argv[])
     CUDA_DEBUG;
     FrTensor fr_tensor(size, tensor);
 
-    FrTensor t1(size / N * (1<<Log2(N)));   FrTensor t2(size / N * (1<<Log2(N)));
-    CUDA_DEBUG;
-    t1.get_data(size, tensor);
-    CUDA_DEBUG;
-    t1.pad(t2, N, 1 << Log2(N), t2.size, Fr::zero());
+    FrTensor t1 = FrTensor::random((size/N)*(1<<Log2(N)));
     
-    CUDA_DEBUG;
     CPU_TIMER_START(commit);
     pad_int(&tensor, N, 1 << Log2(N), (size/N)*(1<<Log2(N)));
     jacob_t *commitment = hyrax.commit(tensor, (size/N)*(1<<Log2(N)), 1 << Log2(N));
@@ -67,7 +64,7 @@ int main(int argc, char *argv[])
     CUDA_DEBUG;
     CPU_TIMER_STOP(commit_fr);
 
-    check_G_equal<<<(size / N / com_scale) / 128, 128>>>(commitment1, commitment, size / N / layer_num);
+    //check_G_equal<<<(size / N / com_scale) / 128, 128>>>(commitment1, commitment, size / N / layer_num);
 
     cout<<"----------------------------------"<<"commit done"<< "----------------------------------"<<endl;
 

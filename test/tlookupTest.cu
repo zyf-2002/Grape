@@ -50,8 +50,8 @@ int main(int argc, char* argv[])
     FrTensor x_tensor(layer_num * 2048 * 16384);
     FrTensor tlookup_A(layer_num * 2048 * 16384);
     
-    for(int i = 0; i < 1; i++){
-        x_tensor.get_data(x_size, x_data);
+    for(int i = 0; i < 4 / layer_num; i++){
+        x_tensor.get_data(x_size, x_data + i * x_size);
         auto v = random_vec(Log2(x_size));
         CPU_TIMER_START(test);
         Fr value = rs.prove(x_tensor, tlookup_A, v, hyrax, 16384, com_time);

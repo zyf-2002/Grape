@@ -466,3 +466,10 @@ void FrTensor::pad(FrTensor &tmp, const uint N, const uint pad_N, const uint pad
     size = pad_size;
 }
 
+FrTensor FrTensor::random(uint size){
+    Fr *tmp = new Fr[size];
+    for(uint i = 0; i < size; i++) tmp[i] = Fr::random_element();
+    FrTensor out(size);
+    cudaMemcpy(out.gpu_data, tmp, size * sizeof(Fr), cudaMemcpyHostToDevice);
+    return out;
+}
